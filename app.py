@@ -109,7 +109,7 @@ for idx in range(st.session_state.num_teams):
         with col3:
             st.markdown("**等級**")
         with col4:
-            st.markdown("**表功**")
+            st.markdown("**表攻**")
         with col5:
             st.markdown("**操作**")
 
@@ -124,7 +124,7 @@ for idx in range(st.session_state.num_teams):
             with col3:
                 member["level"] = st.text_input(f"等級 {i + 1}", value=member["level"], key=f"level_{idx}_{i}")
             with col4:
-                member["score"] = st.text_input(f"表功 {i + 1}", value=member["score"], key=f"score_{idx}_{i}")
+                member["score"] = st.text_input(f"表攻 {i + 1}", value=member["score"], key=f"score_{idx}_{i}")
             with col5:
                 if st.button(f"清空", key=f"clear_{idx}_{i}"):
                     member["name"], member["job"], member["level"], member["score"] = "", "", "", ""

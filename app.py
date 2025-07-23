@@ -1,4 +1,5 @@
 import streamlit as st
+st.set_page_config(layout="wide")
 from streamlit_js_eval import streamlit_js_eval
 import pandas as pd
 from datetime import datetime, timedelta
@@ -77,84 +78,83 @@ for emoji, jobs in job_options.items():
 # 顯示隊伍名單與本周打王時間 + 編輯/刪除成員功能
 st.header("📋 當前隊伍名單")
 for idx in range(st.session_state.num_teams):
-    st.subheader(f"隊伍 {idx + 1}")
-    team = st.session_state.teams[idx]
-    boss_time = st.session_state.boss_times[idx]
+    with st.expander(f"隊伍 {idx + 1}"):
+        team = st.session_state.teams[idx]
+        boss_time = st.session_state.boss_times[idx]
 
-    # 移除原本的日期與時間選擇，改為文字輸入
-    boss_time_input = st.text_input(
-        f"隊伍 {idx + 1} - 打王時間（請自行輸入）",
-        value=boss_time if boss_time else "",
-        key=f"boss_time_text_{idx}"
-    )
-    if boss_time_input != (boss_time if boss_time else ""):
-        st.session_state.boss_times[idx] = boss_time_input
-        sync_to_data()
-        st.success(f"隊伍 {idx + 1} 的本周打王時間已更新為：{boss_time_input}！")
+        # 移除原本的日期與時間選擇，改為文字輸入
+        boss_time_input = st.text_input(
+            f"隊伍 {idx + 1} - 打王時間（請自行輸入）",
+            value=boss_time if boss_time else "",
+            key=f"boss_time_text_{idx}"
+        )
+        if boss_time_input != (boss_time if boss_time else ""):
+            st.session_state.boss_times[idx] = boss_time_input
+            sync_to_data()
+            st.success(f"隊伍 {idx + 1} 的本周打王時間已更新為：{boss_time_input}！")
 
-    # 初始化固定 4x6 表格
-    if not team or len(team) < 6:
-        team = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
-        st.session_state.teams[idx] = team
+        # 初始化固定 4x6 表格
+        if not team or len(team) < 6:
+            team = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
+            st.session_state.teams[idx] = team
 
-    # 顯示表格
-    col0, col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 2, 1])
-    with col0:
-        st.markdown("**#**")
-    with col1:
-        st.markdown("**名稱**")
-    with col2:
-        st.markdown("**職業**")
-    with col3:
-        st.markdown("**等級**")
-    with col4:
-        st.markdown("**表功**")
-    with col5:
-        st.markdown("**操作**")
-
-    for i, member in enumerate(team):
+        # 顯示表格
         col0, col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 2, 1])
         with col0:
-            st.markdown(f"{i + 1}")
+            st.markdown("**#**")
         with col1:
-            member["name"] = st.text_input(f"名稱 {i + 1}", value=member["name"], key=f"name_{idx}_{i}")
+            st.markdown("**名稱**")
         with col2:
-            member["job"] = st.selectbox(f"職業 {i + 1}", [""] + job_select_list, index=job_select_list.index(member["job"]) + 1 if member["job"] in job_select_list else 0, key=f"job_{idx}_{i}")
+            st.markdown("**職業**")
         with col3:
-            member["level"] = st.text_input(f"等級 {i + 1}", value=member["level"], key=f"level_{idx}_{i}")
+            st.markdown("**等級**")
         with col4:
-            member["score"] = st.text_input(f"表功 {i + 1}", value=member["score"], key=f"score_{idx}_{i}")
+            st.markdown("**表功**")
         with col5:
-            if st.button(f"清空", key=f"clear_{idx}_{i}"):
-                member["name"], member["job"], member["level"], member["score"] = "", "", "", ""
+            st.markdown("**操作**")
 
-    # 清空隊伍和刪除隊伍按鈕在同一行
-    col_clear, col_delete = st.columns([1, 1])
-    # Add a refresh flag to session_state
-    if "refresh" not in st.session_state:
-        st.session_state.refresh = False
+        for i, member in enumerate(team):
+            col0, col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 2, 1])
+            with col0:
+                st.markdown(f"{i + 1}")
+            with col1:
+                member["name"] = st.text_input(f"名稱 {i + 1}", value=member["name"], key=f"name_{idx}_{i}")
+            with col2:
+                member["job"] = st.selectbox(f"職業 {i + 1}", [""] + job_select_list, index=job_select_list.index(member["job"]) + 1 if member["job"] in job_select_list else 0, key=f"job_{idx}_{i}")
+            with col3:
+                member["level"] = st.text_input(f"等級 {i + 1}", value=member["level"], key=f"level_{idx}_{i}")
+            with col4:
+                member["score"] = st.text_input(f"表功 {i + 1}", value=member["score"], key=f"score_{idx}_{i}")
+            with col5:
+                if st.button(f"清空", key=f"clear_{idx}_{i}"):
+                    member["name"], member["job"], member["level"], member["score"] = "", "", "", ""
 
-    with col_clear:
-        if st.button(f"清空隊伍 {idx + 1}", key=f"clear_team_{idx}"):
-            st.session_state.teams[idx] = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
-            sync_to_data()
-            st.success(f"隊伍 {idx + 1} 已清空！")
-            st.session_state.refresh = True  # Trigger refresh
-    with col_delete:
-        if st.button(f"刪除隊伍 {idx + 1}", key=f"delete_team_{idx}"):
-            del st.session_state.teams[idx]
-            del st.session_state.boss_times[idx]
-            st.session_state.num_teams -= 1
-            sync_to_data()
-            st.success(f"隊伍 {idx + 1} 已刪除！")
-            st.session_state.refresh = True  # Trigger refresh
+        # 清空隊伍和刪除隊伍按鈕在同一行
+        col_clear, col_delete = st.columns([1, 1])
+        if "refresh" not in st.session_state:
+            st.session_state.refresh = False
 
-    # Check refresh flag and reset it
-    if st.session_state.refresh:
-        st.session_state.refresh = False
-        streamlit_js_eval(js_expressions="parent.window.location.reload()")  # Refresh indirectly
+        with col_clear:
+            if st.button(f"清空隊伍 {idx + 1}", key=f"clear_team_{idx}"):
+                st.session_state.teams[idx] = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
+                sync_to_data()
+                st.success(f"隊伍 {idx + 1} 已清空！")
+                st.session_state.refresh = True  # Trigger refresh
+        with col_delete:
+            if st.button(f"刪除隊伍 {idx + 1}", key=f"delete_team_{idx}"):
+                del st.session_state.teams[idx]
+                del st.session_state.boss_times[idx]
+                st.session_state.num_teams -= 1
+                sync_to_data()
+                st.success(f"隊伍 {idx + 1} 已刪除！")
+                st.session_state.refresh = True  # Trigger refresh
 
-    sync_to_data()
+        # Check refresh flag and reset it
+        if st.session_state.refresh:
+            st.session_state.refresh = False
+            streamlit_js_eval(js_expressions="parent.window.location.reload()")  # Refresh indirectly
+
+        sync_to_data()
 
 # 管理員功能
 with st.expander("🧹 管理員功能"):

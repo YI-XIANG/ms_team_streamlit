@@ -6,18 +6,36 @@ from datetime import datetime, timedelta
 import json
 import os
 
-DATA_PATH = "data.json"
+DATA_PATH = "data.json"  # 資料檔案路徑
+MAX_TEAM_SIZE = 6  # 每隊最大人數
 
 # 讀取/初始化資料
 def load_data():
     if os.path.exists(DATA_PATH):
         with open(DATA_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            content = f.read()
+            if not content.strip():
+                # 檔案為空，自動建立預設資料
+                data = {
+                    "teams": [
+                        {
+                            "team_name": f"隊伍 {i+1}",
+                            "boss_times": "",
+                            "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
+                        } for i in range(3)
+                    ]
+                }
+            else:
+                data = json.loads(content)
     else:
         data = {
-            "teams": [[] for _ in range(3)],
-            "boss_times": [None for _ in range(3)],
-            "num_teams": 3
+            "teams": [
+                {
+                    "team_name": f"隊伍 {i+1}",
+                    "boss_times": "",
+                    "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
+                } for i in range(3)
+            ]
         }
     return data
 
@@ -25,36 +43,47 @@ def save_data(data):
     with open(DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# 建立組隊資訊文字
+def build_team_text(team):
+            title = f"【{team['team_name']} 連7】"
+            time = f"時間：{team['boss_times']}"
+            members = []
+            missing = []
+            for i, member in enumerate(team["member"], 1):
+                if member["name"]:
+                    line = f"{i}. {member['level']} {member['job']} {member['atk']}".strip()
+                    members.append(line)
+                else:
+                    # 缺少成員
+                    line = f"{member['job']}"
+                    if member["atk"]:
+                        line += f" ATK {member['atk']} ↑"
+                    missing.append(line)
+            member_text = "目前成員：\n" + "\n".join(members) if members else ""
+            missing_text = "缺少成員：\n" + "\n".join(missing) + "\n私訊職業/表攻"  if missing else ""
+            result = "\n".join([title, time, member_text, missing_text]).strip()         
+            return result
+
 # 初始化 session_state
 if "data" not in st.session_state:
     st.session_state.data = load_data()
 
 def sync_to_session():
     st.session_state.teams = st.session_state.data["teams"]
-    st.session_state.boss_times = st.session_state.data["boss_times"]
-    st.session_state.num_teams = st.session_state.data["num_teams"]
 
 def sync_to_data():
     st.session_state.data["teams"] = st.session_state.teams
-    st.session_state.data["boss_times"] = st.session_state.boss_times
-    st.session_state.data["num_teams"] = st.session_state.num_teams
     save_data(st.session_state.data)
 
 sync_to_session()
 
-# 設定管理員密碼
-ADMIN_PASSWORD = "123456"
-
-MAX_TEAM_SIZE = 6
 
 st.title("🛡️ 楓之谷公會 - 敲王組隊登記系統")
 st.markdown("請填寫下方資料並選擇要加入的隊伍，每隊上限 6 人，可動態新增隊伍。")
 
-# 1. 顯示本周時間區間
 def get_week_range():
     today = datetime.today()
-    weekday = today.weekday()  # 0=Monday, 3=Thursday
-    # 以禮拜四為一周的開始
+    weekday = today.weekday()
     days_since_thu = (weekday - 3) % 7
     start = today - timedelta(days=days_since_thu)
     end = start + timedelta(days=6)
@@ -63,7 +92,6 @@ def get_week_range():
 
 st.markdown(f"### 本周時間：{get_week_range()}")
 
-# 4. 職業選單
 job_options = {
     "🛡": ["龍騎士", "十字軍", "騎士"],
     "🏹": ["狙擊手", "遊俠"],
@@ -77,26 +105,35 @@ for emoji, jobs in job_options.items():
 
 # 顯示隊伍名單與本周打王時間 + 編輯/刪除成員功能
 st.header("📋 當前隊伍名單")
-for idx in range(st.session_state.num_teams):
-    with st.expander(f"隊伍 {idx + 1}"):
-        team = st.session_state.teams[idx]
-        boss_time = st.session_state.boss_times[idx]
+for idx, team in enumerate(st.session_state.teams):
+    # Expander 標題顯示隊伍名稱和打王時間
+    expander_label = f"{team['team_name']}｜{team['boss_times'] if team['boss_times'] else '未設定打王時間'}"
+    with st.expander(expander_label):
+        # 編輯隊伍名稱
+        team_name_input = st.text_input(
+            f"隊伍名稱 {idx + 1}",
+            value=team["team_name"],
+            key=f"team_name_{idx}"
+        )
+        if team_name_input != team["team_name"]:
+            team["team_name"] = team_name_input
+            sync_to_data()
+            st.success(f"隊伍 {idx + 1} 名稱已更新為：{team_name_input}！")
 
-        # 移除原本的日期與時間選擇，改為文字輸入
+        # 編輯打王時間
         boss_time_input = st.text_input(
-            f"隊伍 {idx + 1} - 打王時間（請自行輸入）",
-            value=boss_time if boss_time else "",
+            f"{team['team_name']} - 打王時間（請自行輸入）",
+            value=team["boss_times"],
             key=f"boss_time_text_{idx}"
         )
-        if boss_time_input != (boss_time if boss_time else ""):
-            st.session_state.boss_times[idx] = boss_time_input
+        if boss_time_input != team["boss_times"]:
+            team["boss_times"] = boss_time_input
             sync_to_data()
-            st.success(f"隊伍 {idx + 1} 的本周打王時間已更新為：{boss_time_input}！")
+            st.success(f"{team['team_name']} 的本周打王時間已更新為：{boss_time_input}！")
 
-        # 初始化固定 4x6 表格
-        if not team or len(team) < 6:
-            team = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
-            st.session_state.teams[idx] = team
+        # 初始化固定 6 人表格
+        if not team["member"] or len(team["member"]) < 6:
+            team["member"] = [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
 
         # 顯示表格
         col0, col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 2, 1])
@@ -113,7 +150,7 @@ for idx in range(st.session_state.num_teams):
         with col5:
             st.markdown("**操作**")
 
-        for i, member in enumerate(team):
+        for i, member in enumerate(team["member"]):
             col0, col1, col2, col3, col4, col5 = st.columns([1, 2, 2, 2, 2, 1])
             with col0:
                 st.markdown(f"{i + 1}")
@@ -124,10 +161,10 @@ for idx in range(st.session_state.num_teams):
             with col3:
                 member["level"] = st.text_input(f"等級 {i + 1}", value=member["level"], key=f"level_{idx}_{i}")
             with col4:
-                member["score"] = st.text_input(f"表攻 {i + 1}", value=member["score"], key=f"score_{idx}_{i}")
+                member["atk"] = st.text_input(f"表攻 {i + 1}", value=member["atk"], key=f"atk_{idx}_{i}")
             with col5:
                 if st.button(f"清空", key=f"clear_{idx}_{i}"):
-                    member["name"], member["job"], member["level"], member["score"] = "", "", "", ""
+                    member["name"], member["job"], member["level"], member["atk"] = "", "", "", ""
 
         # 清空隊伍和刪除隊伍按鈕在同一行
         col_clear, col_delete = st.columns([1, 1])
@@ -135,50 +172,50 @@ for idx in range(st.session_state.num_teams):
             st.session_state.refresh = False
 
         with col_clear:
-            if st.button(f"清空隊伍 {idx + 1}", key=f"clear_team_{idx}"):
-                st.session_state.teams[idx] = [{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)]
+            if st.button(f"清空隊伍", key=f"clear_team_{idx}"):
+                team["member"] = [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
                 sync_to_data()
-                st.success(f"隊伍 {idx + 1} 已清空！")
-                st.session_state.refresh = True  # Trigger refresh
+                st.success(f"{team['team_name']} 已清空！")
+                st.session_state.refresh = True
         with col_delete:
-            if st.button(f"刪除隊伍 {idx + 1}", key=f"delete_team_{idx}"):
+            if st.button(f"刪除隊伍", key=f"delete_team_{idx}"):
                 del st.session_state.teams[idx]
-                del st.session_state.boss_times[idx]
-                st.session_state.num_teams -= 1
                 sync_to_data()
-                st.success(f"隊伍 {idx + 1} 已刪除！")
-                st.session_state.refresh = True  # Trigger refresh
+                st.success(f"{team['team_name']} 已刪除！")
+                st.session_state.refresh = True
 
-        # Check refresh flag and reset it
-        if st.session_state.refresh:
-            st.session_state.refresh = False
-            streamlit_js_eval(js_expressions="parent.window.location.reload()")  # Refresh indirectly
+        # 複製文字顯示/隱藏狀態（每隊獨立）
+        if f"show_copy_{idx}" not in st.session_state:
+            st.session_state[f"show_copy_{idx}"] = False
+
+        def toggle_copy(idx=idx):
+            st.session_state[f"show_copy_{idx}"] = not st.session_state[f"show_copy_{idx}"]
+
+        st.button(
+            "顯示/隱藏複製組隊資訊",
+            key=f"toggle_copy_btn_{idx}",
+            on_click=toggle_copy
+        )
+        
+        if st.session_state[f"show_copy_{idx}"]:
+            team_text = build_team_text(team)
+            st.text_area("複製組隊資訊", value=team_text, key=f"copy_text_{idx}", height=180)
+            if st.session_state.refresh:
+                st.session_state.refresh = False
+                streamlit_js_eval(js_expressions="parent.window.location.reload()")
 
         sync_to_data()
 
-# 管理員功能
-with st.expander("🧹 管理員功能"):
-    admin_pwd = st.text_input("請輸入管理員密碼", type="password")
-    reset_json_btn = st.button("清空所有資料")
-    if reset_json_btn:
-        if admin_pwd == ADMIN_PASSWORD:
-            st.session_state.data = {
-                "teams": [[] for _ in range(3)],
-                "boss_times": [None for _ in range(3)],
-                "num_teams": 3
-            }
-            sync_to_session()
-            save_data(st.session_state.data)
-            st.success("所有資料已清空！")
-            streamlit_js_eval(js_expressions="parent.window.location.reload()")  # 刷新頁面
-        else:
-            st.error("密碼錯誤，無法清空資料！")
-
-# 增加隊伍按鈕
-if st.button("➕ 增加隊伍"):
-    st.session_state.teams.append([{"name": "", "job": "", "level": "", "score": ""} for _ in range(6)])
-    st.session_state.boss_times.append(None)
-    st.session_state.num_teams += 1
-    sync_to_data()
-    st.success(f"已增加隊伍 {st.session_state.num_teams}！")
-    streamlit_js_eval(js_expressions="parent.window.location.reload()")  # 刷新頁面
+# 增加隊伍按鈕（新增時可輸入隊伍名稱）
+with st.form("add_team_form", clear_on_submit=True):
+    new_team_name = st.text_input("新隊伍名稱(盡量不要相同名稱)", value=f"隊伍 {len(st.session_state.teams)+1}")
+    add_team_submit = st.form_submit_button("➕ 增加隊伍")
+    if add_team_submit:
+        st.session_state.teams.append({
+            "team_name": new_team_name,
+            "boss_times": "",
+            "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
+        })
+        sync_to_data()
+        st.success(f"已增加隊伍：{new_team_name}！")
+        streamlit_js_eval(js_expressions="parent.window.location.reload()")

@@ -199,7 +199,7 @@ for idx, team in enumerate(st.session_state.teams):
         
         if st.session_state[f"show_copy_{idx}"]:
             team_text = build_team_text(team)
-            st.text_area("複製組隊資訊", value=team_text, key=f"copy_text_{idx}", height=180)
+            st.text_area("複製組隊資訊", value=team_text, key=f"copy_text_{idx}", height=300)
             if st.session_state.refresh:
                 st.session_state.refresh = False
                 streamlit_js_eval(js_expressions="parent.window.location.reload()")

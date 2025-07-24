@@ -121,16 +121,17 @@ for emoji, jobs in job_options.items():
 # 顯示隊伍名單與本周打王時間 + 編輯/刪除成員功能
 st.header("📋 當前隊伍名單")
 for idx, team in enumerate(st.session_state.teams):
-    # Expander 標題顯示隊伍名稱和打王時間
-    member_counts = len([member for member in team['member'] if member['name']])
-    member_counts = "👤人數已滿" if member_counts == 6 else f"👤目前人數：{member_counts}/{MAX_TEAM_SIZE}"
+    expander_key = f"expander_{idx}"
+    if expander_key not in st.session_state:
+        st.session_state[expander_key] = False  # 預設收起
+
     expander_label = (
         f"⏰{team['team_name']} ｜ "
         f"📅{team['boss_times'] if team['boss_times'] else '未設定打王時間'} | "
         f"👥{"、".join([f'{member["name"]}' for member in team["member"] if member["name"]]) or '無成員'} | "
-        f"{member_counts}"
+        f"{'👤人數已滿' if len([m for m in team['member'] if m['name']]) == 6 else f'👤目前人數：{len([m for m in team['member'] if m['name']])}/{MAX_TEAM_SIZE}'}"
     )
-    with st.expander(expander_label):
+    with st.expander(expander_label, expanded=st.session_state[expander_key]):
         # 編輯隊伍名稱
         team_name_input = st.text_input(
             f"隊伍名稱 {idx + 1}",
@@ -188,6 +189,8 @@ for idx, team in enumerate(st.session_state.teams):
                 if st.button(f"清空", key=f"clear_{idx}_{i}"):
                     member["name"], member["job"], member["level"], member["atk"] = "", "", "", ""
 
+            st.session_state[expander_key] = True
+
         # 清空隊伍、刪除隊伍、顯示/隱藏複製組隊資訊按鈕在同一行
         col_clear, col_delete, col_toggle = st.columns([1, 1, 2])
         if "refresh" not in st.session_state:
@@ -199,12 +202,15 @@ for idx, team in enumerate(st.session_state.teams):
                 sync_to_data()
                 st.success(f"{team['team_name']} 已清空！")
                 st.session_state.refresh = True
+                st.session_state[expander_key] = False
+                streamlit_js_eval(js_expressions="parent.window.location.reload()")
         with col_delete:
             if st.button(f"刪除隊伍", key=f"delete_team_{idx}"):
                 del st.session_state.teams[idx]
                 sync_to_data()
                 st.success(f"{team['team_name']} 已刪除！")
                 st.session_state.refresh = True
+                streamlit_js_eval(js_expressions="parent.window.location.reload()")
         with col_toggle:
             if f"show_copy_{idx}" not in st.session_state:
                 st.session_state[f"show_copy_{idx}"] = False
@@ -217,13 +223,13 @@ for idx, team in enumerate(st.session_state.teams):
                 key=f"toggle_copy_btn_{idx}",
                 on_click=toggle_copy
             )
-        
+
         if st.session_state[f"show_copy_{idx}"]:
             team_text = build_team_text(team)
             st.text_area("複製組隊資訊", value=team_text, key=f"copy_text_{idx}", height=300)
             if st.session_state.refresh:
+                sync_to_data()
                 st.session_state.refresh = False
-                streamlit_js_eval(js_expressions="parent.window.location.reload()")
 
         sync_to_data()
 

@@ -53,7 +53,7 @@ def build_team_text(team):
                 if member["name"]:
                     line = f"{i}. {member['level']} {member['job']}".strip()
                     if member["atk"]:
-                        line += f"乾表: {member['atk']} ↑"
+                        line += f"乾表: {member['atk']}"
                     members.append(line)
                 else:
                     # 缺少成員

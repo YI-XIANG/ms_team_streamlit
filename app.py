@@ -122,7 +122,14 @@ for emoji, jobs in job_options.items():
 st.header("📋 當前隊伍名單")
 for idx, team in enumerate(st.session_state.teams):
     # Expander 標題顯示隊伍名稱和打王時間
-    expander_label = f"{team['team_name']}｜{team['boss_times'] if team['boss_times'] else '未設定打王時間'}"
+    member_counts = len([member for member in team['member'] if member['name']])
+    member_counts = "👤人數已滿" if member_counts == 6 else f"👤目前人數：{member_counts}/{MAX_TEAM_SIZE}"
+    expander_label = (
+        f"⏰{team['team_name']} ｜ "
+        f"📅{team['boss_times'] if team['boss_times'] else '未設定打王時間'} | "
+        f"👥{"、".join([f'{member["name"]}' for member in team["member"] if member["name"]]) or '無成員'} | "
+        f"{member_counts}"
+    )
     with st.expander(expander_label):
         # 編輯隊伍名稱
         team_name_input = st.text_input(
@@ -181,8 +188,8 @@ for idx, team in enumerate(st.session_state.teams):
                 if st.button(f"清空", key=f"clear_{idx}_{i}"):
                     member["name"], member["job"], member["level"], member["atk"] = "", "", "", ""
 
-        # 清空隊伍和刪除隊伍按鈕在同一行
-        col_clear, col_delete = st.columns([1, 1])
+        # 清空隊伍、刪除隊伍、顯示/隱藏複製組隊資訊按鈕在同一行
+        col_clear, col_delete, col_toggle = st.columns([1, 1, 2])
         if "refresh" not in st.session_state:
             st.session_state.refresh = False
 
@@ -198,19 +205,18 @@ for idx, team in enumerate(st.session_state.teams):
                 sync_to_data()
                 st.success(f"{team['team_name']} 已刪除！")
                 st.session_state.refresh = True
+        with col_toggle:
+            if f"show_copy_{idx}" not in st.session_state:
+                st.session_state[f"show_copy_{idx}"] = False
 
-        # 複製文字顯示/隱藏狀態（每隊獨立）
-        if f"show_copy_{idx}" not in st.session_state:
-            st.session_state[f"show_copy_{idx}"] = False
+            def toggle_copy(idx=idx):
+                st.session_state[f"show_copy_{idx}"] = not st.session_state[f"show_copy_{idx}"]
 
-        def toggle_copy(idx=idx):
-            st.session_state[f"show_copy_{idx}"] = not st.session_state[f"show_copy_{idx}"]
-
-        st.button(
-            "顯示/隱藏複製組隊資訊",
-            key=f"toggle_copy_btn_{idx}",
-            on_click=toggle_copy
-        )
+            st.button(
+                "顯示/隱藏複製組隊資訊",
+                key=f"toggle_copy_btn_{idx}",
+                on_click=toggle_copy
+            )
         
         if st.session_state[f"show_copy_{idx}"]:
             team_text = build_team_text(team)

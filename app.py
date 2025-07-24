@@ -69,6 +69,8 @@ def build_team_text(team):
 # 初始化 session_state
 if "data" not in st.session_state:
     st.session_state.data = load_data()
+if "expander" not in st.session_state:
+    st.session_state.expander = {}
 
 def sync_to_session():
     st.session_state.teams = st.session_state.data["teams"]
@@ -117,13 +119,13 @@ job_options = {
 job_select_list = []
 for emoji, jobs in job_options.items():
     job_select_list += [f"{emoji} {job}" for job in jobs]
-
+        
 # 顯示隊伍名單與本周打王時間 + 編輯/刪除成員功能
 st.header("📋 當前隊伍名單")
 for idx, team in enumerate(st.session_state.teams):
     expander_key = f"expander_{idx}"
-    if expander_key not in st.session_state:
-        st.session_state[expander_key] = False  # 預設收起
+    if expander_key not in st.session_state.expander:
+        st.session_state.expander[expander_key] = False  # 預設收起
 
     expander_label = (
         f"⏰{team['team_name']} ｜ "
@@ -131,7 +133,7 @@ for idx, team in enumerate(st.session_state.teams):
         f"👥{"、".join([f'{member["name"]}' for member in team["member"] if member["name"]]) or '無成員'} | "
         f"{'👤人數已滿' if len([m for m in team['member'] if m['name']]) == 6 else f'👤目前人數：{len([m for m in team['member'] if m['name']])}/{MAX_TEAM_SIZE}'}"
     )
-    with st.expander(expander_label, expanded=st.session_state[expander_key]):
+    with st.expander(expander_label, expanded=st.session_state.expander[expander_key]):
         # 編輯隊伍名稱
         team_name_input = st.text_input(
             f"隊伍名稱 {idx + 1}",
@@ -178,21 +180,38 @@ for idx, team in enumerate(st.session_state.teams):
             with col0:
                 st.markdown(f"{i + 1}")
             with col1:
+                old_name = member["name"]
                 member["name"] = st.text_input(f"名稱 {i + 1}", value=member["name"], key=f"name_{idx}_{i}")
+                if member["name"] != old_name:
+                    st.session_state.expander[expander_key] = True
             with col2:
-                member["job"] = st.selectbox(f"職業 {i + 1}", [""] + job_select_list, index=job_select_list.index(member["job"]) + 1 if member["job"] in job_select_list else 0, key=f"job_{idx}_{i}")
+                old_job = member["job"]
+                member["job"] = st.selectbox(
+                    f"職業 {i + 1}",
+                    [""] + job_select_list,
+                    index=job_select_list.index(member["job"]) + 1 if member["job"] in job_select_list else 0,
+                    key=f"job_{idx}_{i}"
+                )
+                if member["job"] != old_job:
+                    st.session_state.expander[expander_key] = True
             with col3:
+                old_level = member["level"]
                 member["level"] = st.text_input(f"等級 {i + 1}", value=member["level"], key=f"level_{idx}_{i}")
+                if member["level"] != old_level:
+                    st.session_state.expander[expander_key] = True
             with col4:
+                old_atk = member["atk"]
                 member["atk"] = st.text_input(f"表攻 {i + 1}", value=member["atk"], key=f"atk_{idx}_{i}")
+                if member["atk"] != old_atk:
+                    st.session_state.expander[expander_key] = True
             with col5:
                 if st.button(f"清空", key=f"clear_{idx}_{i}"):
                     member["name"], member["job"], member["level"], member["atk"] = "", "", "", ""
-
-            st.session_state[expander_key] = True
-
+                    st.session_state.expander[expander_key] = True
+                    sync_to_data()
+                    
         # 清空隊伍、刪除隊伍、顯示/隱藏複製組隊資訊按鈕在同一行
-        col_clear, col_delete, col_toggle = st.columns([1, 1, 2])
+        col_clear, col_delete, col_toggle, col_close = st.columns([1, 1, 1, 1])
         if "refresh" not in st.session_state:
             st.session_state.refresh = False
 
@@ -202,7 +221,7 @@ for idx, team in enumerate(st.session_state.teams):
                 sync_to_data()
                 st.success(f"{team['team_name']} 已清空！")
                 st.session_state.refresh = True
-                st.session_state[expander_key] = False
+                st.session_state.expander[expander_key] = False
                 streamlit_js_eval(js_expressions="parent.window.location.reload()")
         with col_delete:
             if st.button(f"刪除隊伍", key=f"delete_team_{idx}"):
@@ -223,10 +242,16 @@ for idx, team in enumerate(st.session_state.teams):
                 key=f"toggle_copy_btn_{idx}",
                 on_click=toggle_copy
             )
+        with col_close:
+            if st.button("收起", key=f"collapse_{idx}"):
+                st.session_state.expander[expander_key] = False
+                streamlit_js_eval(js_expressions="parent.window.location.reload()")
 
+        # 如果 show_copy 按鈕被點擊，顯示組隊資訊文字區域
         if st.session_state[f"show_copy_{idx}"]:
             team_text = build_team_text(team)
             st.text_area("複製組隊資訊", value=team_text, key=f"copy_text_{idx}", height=300)
+            st.session_state.expander[expander_key] = True  # 展開狀態
             if st.session_state.refresh:
                 sync_to_data()
                 st.session_state.refresh = False

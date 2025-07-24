@@ -52,13 +52,14 @@ def build_team_text(team):
             for i, member in enumerate(team["member"], 1):
                 if member["name"]:
                     line = f"{i}. {member['level']} {member['job']}".strip()
-                    line = f"{line} 乾表:{member['atk']}" if member['atk'] else line
+                    if member["atk"]:
+                        line += f"乾表: {member['atk']} ↑"
                     members.append(line)
                 else:
                     # 缺少成員
                     line = f"{member['job']}"
                     if member["atk"]:
-                        line += f" ATK {member['atk']} ↑"
+                        line += f"乾表: {member['atk']} ↑"
                     missing.append(line)
             member_text = "目前成員：\n" + "\n".join(members) if members else ""
             missing_text = "缺少成員：\n" + "\n".join(missing) + "\n私訊職業/表攻"  if missing else ""

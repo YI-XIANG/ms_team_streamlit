@@ -51,7 +51,8 @@ def build_team_text(team):
             missing = []
             for i, member in enumerate(team["member"], 1):
                 if member["name"]:
-                    line = f"{i}. {member['level']} {member['job']} {member['atk']}".strip()
+                    line = f"{i}. {member['level']} {member['job']}}".strip()
+                    line = f"{line} 乾表:{member['atk']}" if member['atk'] else line
                     members.append(line)
                 else:
                     # 缺少成員

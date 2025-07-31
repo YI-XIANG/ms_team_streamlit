@@ -5,43 +5,44 @@ import pandas as pd
 from datetime import datetime, timedelta
 import json
 import os
+import base64
+import requests
 
-DATA_PATH = "data.json"  # 資料檔案路徑
 MAX_TEAM_SIZE = 6  # 每隊最大人數
 
-# 讀取/初始化資料
+
 def load_data():
-    if os.path.exists(DATA_PATH):
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            content = f.read()
-            if not content.strip():
-                # 檔案為空，自動建立預設資料
-                data = {
-                    "teams": [
-                        {
-                            "team_name": f"隊伍 {i+1}",
-                            "boss_times": "",
-                            "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
-                        } for i in range(3)
-                    ]
-                }
-            else:
-                data = json.loads(content)
-    else:
-        data = {
-            "teams": [
-                {
-                    "team_name": f"隊伍 {i+1}",
-                    "boss_times": "",
-                    "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
-                } for i in range(3)
-            ]
-        }
-    return data
+    firebase_url = st.secrets["firebase"]["url"]
+    try:
+        response = requests.get(firebase_url)
+        if response.status_code == 200 and response.text.strip() != "null":
+            return response.json()
+    except Exception as e:
+        st.error(f"❌ 無法從 Firebase 載入資料：{e}")
+    
+    # 若失敗則回傳預設空資料
+    return {
+        "teams": [
+            {
+                "team_name": f"隊伍 {i+1}",
+                "boss_times": "",
+                "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(6)]
+            } for i in range(3)
+        ]
+    }
 
 def save_data(data):
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    firebase_url = st.secrets["firebase"]["url"]
+
+    # 在資料裡帶入 auth_key，通過 Firebase Rules 驗證
+    data_with_key = data.copy()
+
+    try:
+        response = requests.put(firebase_url, json=data_with_key)
+        if response.status_code != 200:
+            st.warning(f"⚠️ 儲存失敗，HTTP {response.status_code}")
+    except Exception as e:
+        st.error(f"❌ 儲存資料時出錯：{e}")
 
 # 建立組隊資訊文字
 def build_team_text(team):

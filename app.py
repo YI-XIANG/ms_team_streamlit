@@ -14,7 +14,7 @@ JOB_OPTIONS = {
     "🏴‍☠️ 海盜": ["格鬥家", "槍神"],
     "🧙‍♂️ 法師": ["火毒", "冰雷", "祭師"]
 }
-JOB_SELECT_LIST = [""] + [job for sublist in JOB_OPTIONS.values() for job in sublist]
+JOB_SELECT_LIST = [job for sublist in JOB_OPTIONS.values() for job in sublist]
 
 
 # --- 資料處理函式 ---

@@ -128,7 +128,7 @@ with st.expander("📝 系統介紹與說明"):
             - 完成後點擊 **【💾 儲存時間回報】**。
         
         <span style="color:red;">※ 注意事項：每位成員每週以報名 1 組為原則；若需報名 2 組，請自行購買「突襲額外獎勵票券」。請勿報名後缺席，以免造成隊友困擾，感謝配合。</span>
-    """)
+    """, unsafe_allow_html=True)
 
 st.header("👤 公會成員名冊")
 with st.expander("點此註冊或更新你的個人資料"):

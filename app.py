@@ -103,7 +103,7 @@ def generate_weekly_schedule_days():
     for i in range(6):
         current_day = start_of_week + timedelta(days=i)
         # 修正點：將日期的 / 換成 -，以符合 Firebase Key 的規範
-        day_str = f"星期{weekdays_zh[current_day.weekday()]} ({current_day.strftime('%m.%d')})"
+        day_str = f"星期{weekdays_zh[current_day.weekday()]} ({current_day.strftime('%m-%d')})"
         schedule_days.append(day_str)
     return schedule_days
 

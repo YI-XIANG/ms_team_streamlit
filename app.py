@@ -158,7 +158,7 @@ with st.expander("點此註冊或更新你的個人資料"):
             st.rerun()
 
 # --- 當前隊伍名單 ---
-st.header("📋 當前隊伍名單")
+st.header("📋 隊伍名單")
 teams = st.session_state.data.get("teams", [])
 all_members = st.session_state.data.get("members", {})
 member_names_for_team_select = [""] + sorted(list(all_members.keys()))
@@ -220,7 +220,7 @@ for idx, team in enumerate(teams):
             proposed_slots = schedule.get("proposed_slots", {})
 
             with st.form(f"captain_time_form_{idx}"):
-                st.info("請為希望調查的日期填上時間，留空則代表該日期不開放。")
+                st.info("請【隊長】在可以的日期填上時間，留空則代表該日期不開放。")
                 for day_string in WEEKLY_SCHEDULE_DAYS:
                     col1, col2 = st.columns([1, 2])
                     col1.markdown(f"**{day_string}**")

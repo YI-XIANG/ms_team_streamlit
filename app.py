@@ -212,7 +212,7 @@ for idx, team in enumerate(teams):
                     st.text_area("📋 複製組隊資訊", value=build_team_text(st.session_state.data["teams"][idx]), key=f"copy_{idx}", height=180, help="點此複製後可貼到 Discord")
 
         
-                with tab2:
+        with tab2:
             schedule = team.get("schedule", DEFAULT_SCHEDULE.copy())
             
             # --- 【全新改版】步驟1：隊長設定時段 ---
@@ -220,7 +220,7 @@ for idx, team in enumerate(teams):
             proposed_slots = schedule.get("proposed_slots", {})
 
             with st.form(f"captain_time_form_{idx}"):
-                st.info("請為希望調查的日期填上時間，留空則代表該日期不開放。")
+                st.info("請【隊長】在可以的日期填上時間，留空則代表該日期不開放。")
                 for day_string in WEEKLY_SCHEDULE_DAYS:
                     col1, col2 = st.columns([1, 2])
                     col1.markdown(f"**{day_string}**")
@@ -234,23 +234,26 @@ for idx, team in enumerate(teams):
                 
                 if st.form_submit_button("💾 更新時段", type="primary", use_container_width=True):
                     old_availability = schedule.get("availability", {})
-                    # 複製一份舊的，避免超前部署的時段被覆蓋
-                    new_proposed_slots = schedule.get("proposed_slots", {}).copy()
+                    new_proposed_slots = {}
                     
                     for day_string in WEEKLY_SCHEDULE_DAYS:
                         time_val = st.session_state[f"time_input_{idx}_{day_string}"].strip()
                         new_proposed_slots[day_string] = time_val
 
+                    # 從新設定的 slots 產生有效的時段列表
                     valid_new_times = [f"{day} {time}" for day, time in new_proposed_slots.items() if time]
                     
+                    # 清理 availability，只保留在新時段列表中仍然有效的回報
                     cleaned_availability = { UNAVAILABLE_KEY: old_availability.get(UNAVAILABLE_KEY, []) }
                     for time_slot in valid_new_times:
                         if time_slot in old_availability:
                             cleaned_availability[time_slot] = old_availability[time_slot]
 
+                    # 更新 session_state
                     st.session_state.data["teams"][idx]["schedule"]["proposed_slots"] = new_proposed_slots
                     st.session_state.data["teams"][idx]["schedule"]["availability"] = cleaned_availability
 
+                    # 檢查最終時間是否還有效
                     current_final_time = schedule.get("final_time", "")
                     if current_final_time and current_final_time not in valid_new_times:
                         st.session_state.data["teams"][idx]["schedule"]["final_time"] = ""
@@ -263,16 +266,8 @@ for idx, team in enumerate(teams):
             st.markdown("---")
             st.subheader("步驟2：成員填寫")
             
-            # --- 核心修正點 ---
-            # 1. 遍歷已經排好序的 WEEKLY_SCHEDULE_DAYS
-            # 2. 檢查隊長是否為該天設定了時間
-            # 3. 如果有，才將其加入 valid_proposed_times 列表
-            valid_proposed_times = []
-            for day in WEEKLY_SCHEDULE_DAYS:
-                time = proposed_slots.get(day)
-                if time: # 只處理隊長有填寫時間的日期
-                    valid_proposed_times.append(f"{day} {time}")
-            # --- 修正結束 ---
+            # 動態產生有效的調查時段列表供後續使用
+            valid_proposed_times = [f"{day} {time}" for day, time in proposed_slots.items() if time]
             
             current_team_members = sorted([m['name'] for m in team['member'] if m.get('name')])
             availability = schedule.get("availability", {})
@@ -291,7 +286,7 @@ for idx, team in enumerate(teams):
             elif not valid_proposed_times: st.warning("隊長尚未設定任何有效的時段。")
             else:
                 with st.form(f"availability_form_{idx}"):
-                    # 現在這個 for 迴圈會按照 WEEKLY_SCHEDULE_DAYS 的順序執行
+                    # 使用動態產生的列表來顯示
                     for time_slot in valid_proposed_times:
                         c1, c2, c3 = st.columns([1.5, 2, 0.8])
                         c1.markdown(f"**{time_slot}**")

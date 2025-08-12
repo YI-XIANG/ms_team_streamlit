@@ -120,7 +120,7 @@ with st.expander("📝 系統介紹與說明"):
     st.markdown( f"""
         ### 本周區間：{get_week_range()}
         #### **組隊流程**
-        1.  **【註冊角色】** 在下方的 **👤 公會成員名冊** 註冊或更新你的角色資料。
+        1.  **【註冊角色】** 在下方的 **👤 公會成員表** 註冊或更新你的角色資料。
         2.  **【加入隊伍】** 找到想加入的隊伍，在「成員名單」分頁中從下拉選單選擇你的名字，並 **【💾 儲存變更】**。
         3.  **【每週回報時間】**
             - 切換到「時間調查」分頁，在你想參加的時段，從下拉選單中 **選你的名字**。
@@ -130,7 +130,7 @@ with st.expander("📝 系統介紹與說明"):
         <span style="color:red;">※ 注意事項：每位成員每週以報名 1 組為原則；若需報名 2 組，請自行購買「突襲額外獎勵票券」。請勿報名後缺席，以免造成隊友困擾，感謝配合。</span>
     """, unsafe_allow_html=True)
 
-st.header("👤 公會成員名冊")
+st.header("👤 公會成員表")
 with st.expander("點此註冊或更新你的個人資料"):
     all_members = st.session_state.data.get("members", {})
     member_list_for_select = [""] + sorted(list(all_members.keys()))

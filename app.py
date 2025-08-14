@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import requests
 import re
+import json
 
 # --- 基礎設定 ---
 st.set_page_config(layout="wide", page_title="楓之谷組隊系統", page_icon="🍁")
@@ -20,59 +21,69 @@ JOB_SELECT_LIST = [job for sublist in JOB_OPTIONS.values() for job in sublist]
 UNAVAILABLE_KEY = "__UNAVAILABLE__"
 
 # --- 核心函式 ---
+# (此區域函式與上一版相同，保持不變)
 def get_start_of_week(base_date: date) -> date:
-    """計算給定日期所在週的星期四是哪一天"""
     days_since_thu = (base_date.weekday() - 3) % 7
     return base_date - timedelta(days=days_since_thu)
 
-def get_default_schedule():
-    """回傳一個全新的、獨立的預設排程字典，並包含當前的週次開始日期"""
+def get_default_schedule_for_week():
     return {
         "proposed_slots": {},
         "availability": {UNAVAILABLE_KEY: []},
         "final_time": "",
-        "schedule_start_date": get_start_of_week(date.today()).strftime('%Y-%m-%d')
     }
 
 def load_data():
-    """從 Firebase 載入資料，並確保所有隊伍都有完整的資料結構"""
     firebase_url = st.secrets["firebase"]["url"]
     try:
         response = requests.get(f"{firebase_url}.json")
         response.raise_for_status()
         data = response.json()
         if data is None: return {"teams": [], "members": {}}
-        
+
         data.setdefault("teams", [])
         data.setdefault("members", {})
 
+        today = date.today()
+        start_of_this_week_str = get_start_of_week(today).strftime('%Y-%m-%d')
+        start_of_next_week_str = (get_start_of_week(today) + timedelta(days=7)).strftime('%Y-%m-%d')
+        valid_week_keys = {start_of_this_week_str, start_of_next_week_str}
+
         for team in data["teams"]:
+            if "schedule" in team and "schedules" not in team:
+                old_schedule = team.pop("schedule")
+                start_date_key = old_schedule.pop("schedule_start_date", start_of_this_week_str)
+                team["schedules"] = {start_date_key: old_schedule}
+            
+            team.setdefault("schedules", {})
+
+            current_schedules = team.get("schedules", {})
+            managed_schedules = {key: value for key, value in current_schedules.items() if key in valid_week_keys}
+            
+            if start_of_this_week_str not in managed_schedules:
+                managed_schedules[start_of_this_week_str] = get_default_schedule_for_week()
+            if start_of_next_week_str not in managed_schedules:
+                managed_schedules[start_of_next_week_str] = get_default_schedule_for_week()
+            
+            team["schedules"] = managed_schedules
+
             if "boss_times" in team and "team_remark" not in team:
                 team["team_remark"] = team.pop("boss_times")
             else:
                 team.setdefault("team_remark", "")
-            
-            if "schedule" not in team:
-                team["schedule"] = get_default_schedule()
-            
-            default_sched = get_default_schedule()
-            for key, value in default_sched.items():
-                team["schedule"].setdefault(key, value)
-            # 確保舊資料也有 "無法配合" 的鍵
-            team["schedule"].setdefault("availability", {}).setdefault(UNAVAILABLE_KEY, [])
 
         return data
     except requests.exceptions.RequestException as e:
         st.error(f"❌ 無法從 Firebase 載入資料，網路錯誤：{e}")
     except Exception as e:
-        st.error(f"❌ 載入資料時發生未預期的錯誤：{e}")
+        st.error(f"❌ 載入資料時發生未預期的錯誤：{e}, {e.__traceback__.tb_lineno}")
     return {"teams": [], "members": {}}
 
+
 def save_data(data):
-    """將資料儲存到 Firebase"""
     firebase_url = st.secrets["firebase"]["url"]
     try:
-        response = requests.put(f"{firebase_url}.json", json=data)
+        response = requests.put(f"{firebase_url}.json", data=json.dumps(data, ensure_ascii=False))
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         st.error(f"❌ 儲存資料時發生網路錯誤：{e}")
@@ -80,8 +91,11 @@ def save_data(data):
         st.error(f"❌ 儲存資料時發生未預期的錯誤：{e}")
 
 def build_team_text(team):
-    """產生用於複製到 Discord 的組隊資訊文字"""
-    final_time = team.get('schedule', {}).get('final_time')
+    today = date.today()
+    start_of_this_week_str = get_start_of_week(today).strftime('%Y-%m-%d')
+    this_week_schedule = team.get('schedules', {}).get(start_of_this_week_str, {})
+    final_time = this_week_schedule.get('final_time', '')
+    
     time_display = final_time if final_time else "時間待定"
     remark = team.get('team_remark', '')
     title = f"【{team['team_name']} 徵人】"
@@ -101,34 +115,22 @@ def build_team_text(team):
     return "\n\n".join(filter(None, [title, time, remark_text, member_text, missing_text])).strip()
 
 def get_week_range(base_date: date) -> str:
-    """計算並回傳指定日期所在週的週四到下週三的日期區間"""
     start_of_week = get_start_of_week(base_date)
     end_of_week = start_of_week + timedelta(days=6)
     return f"{start_of_week.strftime('%m/%d')} ~ {end_of_week.strftime('%m/%d')}"
 
 def generate_weekly_schedule_days(start_date: date) -> list[str]:
-    """產生從指定日期開始的一週排程列表（週四到下週三）"""
     start_of_week = get_start_of_week(start_date)
     weekdays_zh = ["一", "二", "三", "四", "五", "六", "日"]
     schedule_days = [f"星期{weekdays_zh[(start_of_week + timedelta(days=i)).weekday()]} ({(start_of_week + timedelta(days=i)).strftime('%m-%d')})" for i in range(7)]
     return schedule_days
 
-def update_team_schedule_week(team_index: int, new_base_date: date):
-    """更新指定隊伍的排程到新的一週，並重置相關設定"""
-    new_start_of_week = get_start_of_week(new_base_date)
-    new_week_days = generate_weekly_schedule_days(start_date=new_start_of_week)
-    
-    new_schedule = get_default_schedule()
-    new_schedule["schedule_start_date"] = new_start_of_week.strftime('%Y-%m-%d')
-    new_schedule["proposed_slots"] = {day: "" for day in new_week_days}
-    
-    st.session_state.data["teams"][team_index]["schedule"] = new_schedule
-    sync_data_and_save()
-    st.toast("時段已更新！頁面即將刷新...")
-
 # --- 初始化 Session State & 同步函式 ---
 if "data" not in st.session_state:
     st.session_state.data = load_data()
+
+if "team_view_week" not in st.session_state:
+    st.session_state.team_view_week = {}
 
 def sync_data_and_save():
     save_data(st.session_state.data)
@@ -142,15 +144,16 @@ with st.expander("📝 系統介紹與說明"):
         1.  **【註冊角色】** 在下方的 **👤 公會成員表** 註冊或更新你的角色資料。
         2.  **【加入隊伍】** 找到想加入的隊伍，在「成員名單」分頁中從下拉選單選擇你的名字，並 **【💾 儲存變更】**。
         3.  **【每週回報時間】**
-            - 在「時間調查」分頁，可使用 **◀️** 和 **▶️** 按鈕切換【本週】與【下週】時段。
-            - **隊長**在「步驟1」設定該週可行的時段。
+            - 在「時間調查」分頁，可使用 **◀️** 和 **▶️** 按鈕切換【本週】與【下週】時段。**切換週次不會清除已填寫的資料**。
+            - **隊長**在「步驟1」設定該週可行的時段。若時段未變更，成員回報不會被重置；若只修改部分時段，也僅有被修改的時段會重置回報。
             - **隊員**在「步驟2」勾選自己可以的時間。
         
-        <span style="color:red;">※ 注意事項：切換週次會重置該隊伍的時間設定與回報。每位成員每週以報名 1 組為原則。</span>
+        <span style="color:red;">※ 注意事項：系統會自動管理本週與下週的資料，每週四凌晨會自動輪替。</span>
     """, unsafe_allow_html=True)
 
 st.header("👤 公會成員表")
 with st.expander("點此註冊或更新你的個人資料"):
+    # (此部分程式碼不變，故省略)
     all_members = st.session_state.data.get("members", {})
     member_list_for_select = [""] + sorted(list(all_members.keys()))
     selected_member_name = st.selectbox("選擇你的角色 (或留空以註冊新角色)", options=member_list_for_select, key="member_select_main")
@@ -189,9 +192,21 @@ teams = st.session_state.data.get("teams", [])
 all_members = st.session_state.data.get("members", {})
 member_names_for_team_select = [""] + sorted(list(all_members.keys()))
 
+today = date.today()
+start_of_this_week = get_start_of_week(today)
+start_of_this_week_str = start_of_this_week.strftime('%Y-%m-%d')
+start_of_next_week_str = (start_of_this_week + timedelta(days=7)).strftime('%Y-%m-%d')
+
 for idx, team in enumerate(teams):
-    schedule = team.get("schedule", get_default_schedule())
-    final_time = schedule.get('final_time')
+    if idx not in st.session_state.team_view_week:
+        st.session_state.team_view_week[idx] = start_of_this_week_str
+    
+    view_week_start_str = st.session_state.team_view_week[idx]
+    view_week_start_date = datetime.strptime(view_week_start_str, '%Y-%m-%d').date()
+    
+    schedule_to_display = team.get("schedules", {}).get(view_week_start_str, get_default_schedule_for_week())
+    
+    final_time = schedule_to_display.get('final_time')
     expander_label = f"🍁 **{team['team_name']}**｜📅 **最終時間：{final_time}**" if final_time else f"🍁 **{team['team_name']}**｜⏰ 時間調查中..."
     
     with st.expander(expander_label):
@@ -204,6 +219,7 @@ for idx, team in enumerate(teams):
         tab1, tab2 = st.tabs(["**👥 成員名單**", "**🗓️ 時間調查**"])
 
         with tab1:
+            # (成員名單 Tab 的程式碼不變，故省略)
             with st.form(f"team_form_{idx}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 team_name = c1.text_input("隊伍名稱", value=team["team_name"], key=f"name_{idx}")
@@ -212,8 +228,8 @@ for idx, team in enumerate(teams):
                 st.write("**編輯隊伍成員 (請由名稱欄位選擇)：**")
                 current_members_list = team.get("member", [])
                 if len(current_members_list) != MAX_TEAM_SIZE:
-                    current_members_list.extend([{"name": "", "job": "", "level": "", "atk": ""}] * (MAX_TEAM_SIZE - len(current_members_list)))
-                    current_members_list = current_members_list[:MAX_TEAM_SIZE]
+                    current_members_list.extend([{"name": "", "job": "", "level": "", "atk": ""} for _ in range(MAX_TEAM_SIZE - len(current_members_list))])
+                current_members_list = current_members_list[:MAX_TEAM_SIZE]
 
                 df = pd.DataFrame(current_members_list).reindex(columns=['name', 'job', 'level', 'atk'], fill_value="")
                 edited_df = st.data_editor(df, key=f"editor_{idx}", num_rows="fixed", use_container_width=True,
@@ -249,155 +265,130 @@ for idx, team in enumerate(teams):
 
 
         with tab2:
-            schedule_start_date_str = schedule.get("schedule_start_date", get_start_of_week(date.today()).strftime('%Y-%m-%d'))
-            schedule_base_date = datetime.strptime(schedule_start_date_str, '%Y-%m-%d').date()
-            
-            today = date.today()
-            start_of_this_week = get_start_of_week(today)
-            start_of_next_week = start_of_this_week + timedelta(days=7)
-            
-            is_this_week = (schedule_base_date == start_of_this_week)
-            is_next_week = (schedule_base_date == start_of_next_week)
-            
-            displayed_schedule_days = generate_weekly_schedule_days(start_date=schedule_base_date)
-
+            displayed_schedule_days = generate_weekly_schedule_days(start_date=view_week_start_date)
             st.markdown("---")
-            st.subheader(f"步驟1：隊長設定時段，🗓️ **目前顯示時段：{get_week_range(schedule_base_date)}**")
+            st.subheader(f"步驟1：隊長設定時段，🗓️ **目前顯示時段：{get_week_range(view_week_start_date)}**")
 
             info_col, btn1_col, btn2_col = st.columns([2, 1, 1])
-  
             with info_col:
-                st.info("請【隊長】在右方切換週次後，於下方填寫時間。")
+                is_this_week = view_week_start_str == start_of_this_week_str
+                st.info("點擊右方按鈕切換【本週】與【下週】時段。")
 
-            if btn1_col.button("◀️ 返回本週", key=f"this_week_{idx}", use_container_width=True, help="返回本週時段，將會重置目前的時間與回報。"):
-                if is_this_week:
-                    st.toast("已經是本週時段了！")
-                else:
-                    update_team_schedule_week(idx, today)
-                    st.rerun()
+            if btn1_col.button("◀️ 返回本週", key=f"this_week_{idx}", use_container_width=True, disabled=is_this_week):
+                st.session_state.team_view_week[idx] = start_of_this_week_str
+                st.rerun()
 
-            if btn2_col.button("前往下週 ▶️", key=f"next_week_{idx}", use_container_width=True, help="前往下週時段，將會重置目前的時間與回報。"):
-                if is_next_week:
-                    st.toast("已是下週時段，無法再前進。")
-                else:
-                    update_team_schedule_week(idx, today + timedelta(days=7))
-                    st.rerun()
+            if btn2_col.button("前往下週 ▶️", key=f"next_week_{idx}", use_container_width=True, disabled=not is_this_week):
+                st.session_state.team_view_week[idx] = start_of_next_week_str
+                st.rerun()
             
-            proposed_slots = schedule.get("proposed_slots", {})
+            old_proposed_slots = schedule_to_display.get("proposed_slots", {})
+            current_availability = schedule_to_display.get("availability", {})
+
             with st.form(f"captain_time_form_{idx}"):
                 for day_string in displayed_schedule_days:
                     col1, col2 = st.columns([1, 2])
                     col1.markdown(f"**{day_string}**")
-                    col2.text_input("時間", value=proposed_slots.get(day_string, ""), key=f"time_input_{idx}_{day_string}", placeholder="例如: 21:00 或 晚上", label_visibility="collapsed")
+                    col2.text_input("時間", value=old_proposed_slots.get(day_string, ""), key=f"time_input_{idx}_{view_week_start_str}_{day_string}", placeholder="例如: 21:00 或 晚上", label_visibility="collapsed")
                 
                 if st.form_submit_button("💾 更新時段", type="primary", use_container_width=True):
-                    new_proposed_slots = {day_string: st.session_state[f"time_input_{idx}_{day_string}"].strip() for day_string in displayed_schedule_days}
-                    st.session_state.data["teams"][idx]["schedule"]["proposed_slots"] = new_proposed_slots
-                    # 當隊長更新時段後，清空舊的回報，避免資料錯亂
-                    st.session_state.data["teams"][idx]["schedule"]["availability"] = {UNAVAILABLE_KEY: []}
-                    st.session_state.data["teams"][idx]["schedule"]["final_time"] = ""
-                    sync_data_and_save()
-                    st.success("時段已更新，舊的回報已清除！")
-                    st.rerun()
+                    new_proposed_slots = {day: st.session_state[f"time_input_{idx}_{view_week_start_str}_{day}"].strip() for day in displayed_schedule_days}
+                    
+                    if new_proposed_slots == old_proposed_slots:
+                        st.toast("時段沒有變更，無需更新。")
+                    else:
+                        # --- 【核心修正】精細化更新邏輯 START ---
+                        updated_availability = {UNAVAILABLE_KEY: current_availability.get(UNAVAILABLE_KEY, [])}
+                        
+                        for day in displayed_schedule_days:
+                            old_time = old_proposed_slots.get(day, "")
+                            new_time = new_proposed_slots.get(day, "")
+                            
+                            if old_time == new_time:
+                                # 時間未變，保留舊的回報
+                                if old_time: # 確保是有時段的
+                                    old_slot_key = f"{day} {old_time}"
+                                    updated_availability[old_slot_key] = current_availability.get(old_slot_key, [])
+                            else:
+                                # 時間已變，舊的回報作廢，為新時間建立空列表
+                                if new_time:
+                                    new_slot_key = f"{day} {new_time}"
+                                    updated_availability[new_slot_key] = []
+                        
+                        # 更新資料庫
+                        data_path = st.session_state.data["teams"][idx]["schedules"][view_week_start_str]
+                        data_path["proposed_slots"] = new_proposed_slots
+                        data_path["availability"] = updated_availability
+                        data_path["final_time"] = "" # 重置最終時間，因為可能指向已變更的時段
+                        
+                        sync_data_and_save()
+                        st.success("時段已更新！有變更的時段之成員回報已被重置。")
+                        st.rerun()
+                        # --- 【核心修正】精細化更新邏輯 END ---
 
             st.markdown("---")
             st.subheader("步驟2：成員填寫")
-            valid_proposed_times = [f"{day} {time}" for day in displayed_schedule_days if (time := proposed_slots.get(day))]
+            # 使用更新後的 `new_proposed_slots` 來產生有效的時間選項
+            valid_proposed_times = [f"{day} {time}" for day in displayed_schedule_days if (time := old_proposed_slots.get(day))]
             current_team_members = sorted([m['name'] for m in team['member'] if m.get('name')])
-            availability = schedule.get("availability", {})
 
             if not current_team_members: st.warning("隊伍中尚無成員，請先至「成員名單」分頁加入。")
             elif not valid_proposed_times: st.warning("隊長尚未設定任何有效的時段。")
             else:
                 with st.form(f"availability_form_{idx}"):
-                    # --- 修正點 START ---
-                    # 這裡的邏輯是修正的核心，確保UI總是反映已儲存的狀態
-                    
-                    # 用於在表單提交後，暫存使用者在UI上的選擇
-                    form_selections = {}
-
+                    # (此部分程式碼與上次修正相同，保持其可靠性)
                     for time_slot in valid_proposed_times:
                         c1, c2, c3 = st.columns([1.5, 2, 0.8])
                         c1.markdown(f"**{time_slot}**")
-                        
-                        # 1. 從可靠的資料來源 (availability) 取得已儲存的預設值
-                        #    過濾掉已經不在隊伍中的成員，以防資料陳舊
-                        saved_selection = [name for name in availability.get(time_slot, []) if name in current_team_members]
-                        
-                        # 2. 使用 multiselect 的 'default' 參數來設定預設值
-                        #    將元件的 key 和變數分開，避免混淆
-                        #    元件的回傳值是使用者當前在UI上的選擇
-                        current_selection = c2.multiselect(
-                            "可到場成員", 
-                            options=current_team_members, 
-                            default=saved_selection, # << 關鍵修正！
-                            key=f"ms_{idx}_{time_slot}", 
-                            label_visibility="collapsed"
-                        )
-                        
-                        # 將當前的選擇存起來，以便提交時使用
-                        form_selections[time_slot] = current_selection
-
-                        # 3. 人數統計直接使用元件的回傳值，可以即時反應UI上的變化
+                        saved_selection = [name for name in current_availability.get(time_slot, []) if name in current_team_members]
+                        current_selection = c2.multiselect("可到場成員", options=current_team_members, default=saved_selection, key=f"ms_{idx}_{view_week_start_str}_{time_slot}", label_visibility="collapsed")
                         c3.metric("可到場人數", f"{len(current_selection)} / {len(current_team_members)}")
                     
                     st.markdown("---")
                     c1, c2 = st.columns([1.5, 2.8])
                     c1.markdown("**<font color='orange'>都無法配合</font>**", unsafe_allow_html=True)
-                    
-                    # 同樣地，為「無法配合」的選項設定正確的預設值
-                    saved_unavailable = [name for name in availability.get(UNAVAILABLE_KEY, []) if name in current_team_members]
-                    unavailable_selection = c2.multiselect(
-                        "勾選此處表示以上時間皆無法配合", 
-                        options=current_team_members, 
-                        default=saved_unavailable, # << 關鍵修正！
-                        key=f"ms_{idx}_{UNAVAILABLE_KEY}", 
-                        label_visibility="collapsed"
-                    )
-                    form_selections[UNAVAILABLE_KEY] = unavailable_selection
-
-                    # --- 修正點 END ---
+                    saved_unavailable = [name for name in current_availability.get(UNAVAILABLE_KEY, []) if name in current_team_members]
+                    unavailable_selection = c2.multiselect("勾選此處表示以上時間皆無法配合", options=current_team_members, default=saved_unavailable, key=f"ms_{idx}_{view_week_start_str}_{UNAVAILABLE_KEY}", label_visibility="collapsed")
                     
                     if st.form_submit_button("💾 儲存時間回報", type="primary", use_container_width=True):
-                        # 提交表單時，我們從 st.session_state 讀取由表單提交的最終值
                         new_availability = {}
                         all_attending_members = set()
-                        
                         for time_slot in valid_proposed_times:
-                            # 讀取表單提交後，存在 st.session_state 的值
-                            selections = st.session_state[f"ms_{idx}_{time_slot}"]
+                            selections = st.session_state[f"ms_{idx}_{view_week_start_str}_{time_slot}"]
                             new_availability[time_slot] = selections
                             all_attending_members.update(selections)
                         
-                        # 處理無法配合的人員，確保他們沒有同時勾選其他可到場時間
-                        unavailable_selections = st.session_state[f"ms_{idx}_{UNAVAILABLE_KEY}"]
+                        unavailable_selections = st.session_state[f"ms_{idx}_{view_week_start_str}_{UNAVAILABLE_KEY}"]
                         new_availability[UNAVAILABLE_KEY] = [name for name in unavailable_selections if name not in all_attending_members]
                         
-                        st.session_state.data["teams"][idx]["schedule"]["availability"] = new_availability
+                        # 將成員回報與「都無法配合」合併到現有的 availability 字典中
+                        data_path = st.session_state.data["teams"][idx]["schedules"][view_week_start_str]
+                        data_path["availability"].update(new_availability)
+
                         sync_data_and_save()
                         st.success("時間回報已成功儲存！")
                         st.rerun()
 
             st.markdown("---")
             st.subheader("步驟3：確認最終時間")
-            unavailable_list = availability.get(UNAVAILABLE_KEY, [])
+            unavailable_list = current_availability.get(UNAVAILABLE_KEY, [])
             if unavailable_list: st.warning(f"**已確認無法參加：** {', '.join(unavailable_list)}")
             
             if not valid_proposed_times: st.info("設定時段後，此處可選擇最終開打時間。")
             else:
                 with st.form(f"final_time_form_{idx}"):
-                    options = ["尚未決定"] + [f"{ts} ({len(availability.get(ts, []))}人可)" for ts in valid_proposed_times]
-                    current_final = schedule.get("final_time")
+                    options = ["尚未決定"] + [f"{ts} ({len(current_availability.get(ts, []))}人可)" for ts in valid_proposed_times]
+                    current_final = schedule_to_display.get("final_time")
                     current_idx = next((i for i, opt in enumerate(options) if opt.startswith(current_final)), 0) if current_final else 0
                     
-                    selected_str = st.selectbox("隊長確認時間", options=options, index=current_idx, key=f"final_time_{idx}")
+                    selected_str = st.selectbox("隊長確認時間", options=options, index=current_idx, key=f"final_time_{idx}_{view_week_start_str}")
                     if st.form_submit_button("✅ 確認最終時間", use_container_width=True):
                         final_time_to_save = ""
                         if selected_str != "尚未決定":
                             match = re.match(r"^(.*?)\s*\(\d+人可\)$", selected_str)
                             if match: final_time_to_save = match.group(1).strip()
                         
-                        st.session_state.data["teams"][idx]["schedule"]["final_time"] = final_time_to_save
+                        st.session_state.data["teams"][idx]["schedules"][view_week_start_str]["final_time"] = final_time_to_save
                         sync_data_and_save()
                         st.success(f"最終時間已確認為：{final_time_to_save or '尚未決定'}")
                         st.rerun()
@@ -407,13 +398,16 @@ with st.form("add_team_form", clear_on_submit=True):
     new_team_name_input = st.text_input("新隊伍名稱", placeholder=f"例如：拉圖斯 {len(teams) + 1} 隊")
     if st.form_submit_button("建立隊伍"):
         if new_team_name_input:
-            new_schedule = get_default_schedule()
-            new_schedule["proposed_slots"] = {day: "" for day in generate_weekly_schedule_days(date.today())}
+            new_schedules = {
+                start_of_this_week_str: get_default_schedule_for_week(),
+                start_of_next_week_str: get_default_schedule_for_week()
+            }
+            new_schedules[start_of_this_week_str]['proposed_slots'] = {day: "" for day in generate_weekly_schedule_days(start_of_this_week)}
 
             st.session_state.data.setdefault("teams", []).append({
                 "team_name": new_team_name_input, "team_remark": "",
                 "member": [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(MAX_TEAM_SIZE)],
-                "schedule": new_schedule
+                "schedules": new_schedules
             })
             sync_data_and_save()
             st.success(f"已成功建立新隊伍：{new_team_name_input}！")

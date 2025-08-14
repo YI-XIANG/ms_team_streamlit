@@ -58,7 +58,8 @@ def load_data():
             default_sched = get_default_schedule()
             for key, value in default_sched.items():
                 team["schedule"].setdefault(key, value)
-            team["schedule"]["availability"].setdefault(UNAVAILABLE_KEY, [])
+            # 確保舊資料也有 "無法配合" 的鍵
+            team["schedule"].setdefault("availability", {}).setdefault(UNAVAILABLE_KEY, [])
 
         return data
     except requests.exceptions.RequestException as e:
@@ -203,7 +204,6 @@ for idx, team in enumerate(teams):
         tab1, tab2 = st.tabs(["**👥 成員名單**", "**🗓️ 時間調查**"])
 
         with tab1:
-            # ... (成員名單Tab內容不變)
             with st.form(f"team_form_{idx}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 team_name = c1.text_input("隊伍名稱", value=team["team_name"], key=f"name_{idx}")
@@ -252,22 +252,18 @@ for idx, team in enumerate(teams):
             schedule_start_date_str = schedule.get("schedule_start_date", get_start_of_week(date.today()).strftime('%Y-%m-%d'))
             schedule_base_date = datetime.strptime(schedule_start_date_str, '%Y-%m-%d').date()
             
-            # --- 【核心】週次判斷邏輯 ---
             today = date.today()
             start_of_this_week = get_start_of_week(today)
             start_of_next_week = start_of_this_week + timedelta(days=7)
             
-            # 判斷當前顯示的是本週還是下週
             is_this_week = (schedule_base_date == start_of_this_week)
             is_next_week = (schedule_base_date == start_of_next_week)
             
-            # 產生當前顯示週的日期列表
             displayed_schedule_days = generate_weekly_schedule_days(start_date=schedule_base_date)
 
             st.markdown("---")
             st.subheader(f"步驟1：隊長設定時段，🗓️ **目前顯示時段：{get_week_range(schedule_base_date)}**")
 
-            # --- 【核心】UI 佈局修改 ---
             info_col, btn1_col, btn2_col = st.columns([2, 1, 1])
   
             with info_col:
@@ -297,11 +293,13 @@ for idx, team in enumerate(teams):
                 if st.form_submit_button("💾 更新時段", type="primary", use_container_width=True):
                     new_proposed_slots = {day_string: st.session_state[f"time_input_{idx}_{day_string}"].strip() for day_string in displayed_schedule_days}
                     st.session_state.data["teams"][idx]["schedule"]["proposed_slots"] = new_proposed_slots
+                    # 當隊長更新時段後，清空舊的回報，避免資料錯亂
+                    st.session_state.data["teams"][idx]["schedule"]["availability"] = {UNAVAILABLE_KEY: []}
+                    st.session_state.data["teams"][idx]["schedule"]["final_time"] = ""
                     sync_data_and_save()
-                    st.success("時段已更新！")
+                    st.success("時段已更新，舊的回報已清除！")
                     st.rerun()
 
-            # ... (步驟2 和 步驟3 的程式碼維持不變，因為它們的邏輯是建立在已正確計算的變數之上)
             st.markdown("---")
             st.subheader("步驟2：成員填寫")
             valid_proposed_times = [f"{day} {time}" for day in displayed_schedule_days if (time := proposed_slots.get(day))]
@@ -312,31 +310,66 @@ for idx, team in enumerate(teams):
             elif not valid_proposed_times: st.warning("隊長尚未設定任何有效的時段。")
             else:
                 with st.form(f"availability_form_{idx}"):
+                    # --- 修正點 START ---
+                    # 這裡的邏輯是修正的核心，確保UI總是反映已儲存的狀態
+                    
+                    # 用於在表單提交後，暫存使用者在UI上的選擇
+                    form_selections = {}
+
                     for time_slot in valid_proposed_times:
-                        session_key = f"ms_{idx}_{time_slot}"
-                        if session_key not in st.session_state:
-                             st.session_state[session_key] = [name for name in availability.get(time_slot, []) if name in current_team_members]
                         c1, c2, c3 = st.columns([1.5, 2, 0.8])
                         c1.markdown(f"**{time_slot}**")
-                        c2.multiselect("可到場成員", options=current_team_members, key=session_key, label_visibility="collapsed")
-                        c3.metric("可到場人數", f"{len(st.session_state[session_key])} / {len(current_team_members)}")
+                        
+                        # 1. 從可靠的資料來源 (availability) 取得已儲存的預設值
+                        #    過濾掉已經不在隊伍中的成員，以防資料陳舊
+                        saved_selection = [name for name in availability.get(time_slot, []) if name in current_team_members]
+                        
+                        # 2. 使用 multiselect 的 'default' 參數來設定預設值
+                        #    將元件的 key 和變數分開，避免混淆
+                        #    元件的回傳值是使用者當前在UI上的選擇
+                        current_selection = c2.multiselect(
+                            "可到場成員", 
+                            options=current_team_members, 
+                            default=saved_selection, # << 關鍵修正！
+                            key=f"ms_{idx}_{time_slot}", 
+                            label_visibility="collapsed"
+                        )
+                        
+                        # 將當前的選擇存起來，以便提交時使用
+                        form_selections[time_slot] = current_selection
+
+                        # 3. 人數統計直接使用元件的回傳值，可以即時反應UI上的變化
+                        c3.metric("可到場人數", f"{len(current_selection)} / {len(current_team_members)}")
                     
                     st.markdown("---")
                     c1, c2 = st.columns([1.5, 2.8])
                     c1.markdown("**<font color='orange'>都無法配合</font>**", unsafe_allow_html=True)
-                    unavailable_key = f"ms_{idx}_{UNAVAILABLE_KEY}"
-                    if unavailable_key not in st.session_state:
-                        st.session_state[unavailable_key] = [name for name in availability.get(UNAVAILABLE_KEY, []) if name in current_team_members]
-                    c2.multiselect("勾選此處表示以上時間皆無法配合", options=current_team_members, key=unavailable_key, label_visibility="collapsed")
+                    
+                    # 同樣地，為「無法配合」的選項設定正確的預設值
+                    saved_unavailable = [name for name in availability.get(UNAVAILABLE_KEY, []) if name in current_team_members]
+                    unavailable_selection = c2.multiselect(
+                        "勾選此處表示以上時間皆無法配合", 
+                        options=current_team_members, 
+                        default=saved_unavailable, # << 關鍵修正！
+                        key=f"ms_{idx}_{UNAVAILABLE_KEY}", 
+                        label_visibility="collapsed"
+                    )
+                    form_selections[UNAVAILABLE_KEY] = unavailable_selection
+
+                    # --- 修正點 END ---
                     
                     if st.form_submit_button("💾 儲存時間回報", type="primary", use_container_width=True):
+                        # 提交表單時，我們從 st.session_state 讀取由表單提交的最終值
                         new_availability = {}
                         all_attending_members = set()
+                        
                         for time_slot in valid_proposed_times:
+                            # 讀取表單提交後，存在 st.session_state 的值
                             selections = st.session_state[f"ms_{idx}_{time_slot}"]
                             new_availability[time_slot] = selections
                             all_attending_members.update(selections)
                         
+                        # 處理無法配合的人員，確保他們沒有同時勾選其他可到場時間
                         unavailable_selections = st.session_state[f"ms_{idx}_{UNAVAILABLE_KEY}"]
                         new_availability[UNAVAILABLE_KEY] = [name for name in unavailable_selections if name not in all_attending_members]
                         

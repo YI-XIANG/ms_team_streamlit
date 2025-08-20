@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, date
 import requests
 import re
 import json
+import io
 
 # --- 基礎設定 ---
 st.set_page_config(layout="wide", page_title="楓之谷組隊系統", page_icon="🍁")
@@ -149,6 +150,61 @@ def generate_weekly_schedule_days(start_date: date) -> list[str]:
     ]
     return schedule_days
 
+@st.dialog("下載人員手冊")
+def download_members_csv():
+    """彈跳視窗：輸入密碼下載人員手冊"""
+    st.write("請輸入管理員密碼以下載完整人員手冊：")
+    
+    password = st.text_input("密碼", type="password", key="download_password")
+    
+    col1, col2 = st.columns(2)
+    
+    if col1.button("下載", type="primary", use_container_width=True):
+        # 這裡可以自訂密碼，建議從 secrets 讀取
+        correct_password = st.secrets.get("download_password", st.secrets["setting"]["pwd"])
+        
+        if password == correct_password:
+            # 準備 CSV 資料
+            all_members = st.session_state.data.get("members", {})
+            if all_members:
+                members_data = []
+                for name, info in all_members.items():
+                    members_data.append({
+                        "遊戲ID": name,
+                        "職業": info.get("job", ""),
+                        "等級": info.get("level", ""),
+                        "表攻": info.get("atk", ""),
+                        "公會成員": "是" if info.get("is_guild_member", True) else "否"
+                    })
+                
+                df = pd.DataFrame(members_data)
+                
+                # 轉換為 CSV
+                csv_buffer = io.StringIO()
+                df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+                csv_data = csv_buffer.getvalue()
+                
+                # 產生檔案名稱
+                current_date = datetime.now().strftime("%Y%m%d")
+                filename = f"楓之谷公會成員名冊_{current_date}.csv"
+                
+                st.download_button(
+                    label="📥 下載 CSV 檔案",
+                    data=csv_data,
+                    file_name=filename,
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("密碼正確！請點擊上方按鈕下載檔案。")
+            else:
+                st.warning("目前沒有成員資料可供下載。")
+        else:
+            st.error("密碼錯誤，請重新輸入。")
+    
+    if col2.button("取消", use_container_width=True):
+        st.rerun()
+
+
 # --- 初始化 Session State & 同步函式 ---
 if "data" not in st.session_state:
     st.session_state.data = load_data()
@@ -177,35 +233,41 @@ with st.expander("📝 系統介紹與說明"):
         <span style="color:red;">※ 注意事項：系統會自動管理本週與下週的資料，每週四凌晨會自動輪替。</span>
         """, unsafe_allow_html=True)
 
-
+# ------ 註冊功能 ------
 st.header("👤 公會成員表")
 with st.expander("點此註冊或更新你的個人資料"):
     all_members = st.session_state.data.get("members", {})
     member_list_for_select = [""] + sorted(list(all_members.keys()))
 
     selected_member_name = st.selectbox("選擇你的角色 (或留空以註冊新角色)", options=member_list_for_select, key="member_select_main")
-    default_info = all_members.get(selected_member_name, {"job": "", "level": "", "atk": ""})
+    default_info = all_members.get(selected_member_name, {"job": "", "level": "", "atk": "", "is_guild_member": True})
     job_index = JOB_SELECT_LIST.index(default_info["job"]) if default_info.get("job") in JOB_SELECT_LIST else 0
 
     with st.form("member_form", clear_on_submit=False):
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
         name_input = c1.text_input("遊戲ID", value=selected_member_name, disabled=bool(selected_member_name), help="註冊新角色時請在此填寫ID，選擇舊角色則此欄不可編輯。")
         job_input = c2.selectbox("職業", options=JOB_SELECT_LIST, index=job_index)
         level_input = c3.text_input("等級", value=default_info.get("level", ""))
         atk_input = c4.text_input("表攻 (乾表)", value=default_info.get("atk", ""))
+        is_guild_member = c5.checkbox("公會成員", value=default_info.get("is_guild_member", True), help="勾選表示為公會正式成員")
 
-        submit_col, delete_col = st.columns([4, 1])
-        if submit_col.form_submit_button("💾 儲存角色資料", use_container_width=True):
+        button_cols = st.columns([3, 1, 1])
+        if button_cols[0].form_submit_button("💾 儲存角色資料", use_container_width=True):
             final_name = selected_member_name or name_input.strip()
             if not final_name:
                 st.warning("請務必填寫遊戲ID！")
             else:
-                st.session_state.data["members"][final_name] = {"job": job_input, "level": level_input, "atk": atk_input}
+                st.session_state.data["members"][final_name] = {
+                    "job": job_input, 
+                    "level": level_input, 
+                    "atk": atk_input,
+                    "is_guild_member": is_guild_member
+                }
                 sync_data_and_save()
                 st.success(f"角色 '{final_name}' 的資料已儲存！")
                 st.rerun()
 
-        if selected_member_name and delete_col.form_submit_button("🗑️ 刪除此角色", use_container_width=True):
+        if selected_member_name and button_cols[1].form_submit_button("🗑️ 刪除此角色", use_container_width=True):
             del st.session_state.data["members"][selected_member_name]
             # 同步刪除隊伍中的成員
             for team_idx in range(len(st.session_state.data['teams'])):
@@ -216,7 +278,12 @@ with st.expander("點此註冊或更新你的個人資料"):
             st.success(f"角色 '{selected_member_name}' 已從名冊中刪除！")
             st.rerun()
 
+    # 下載功能放在表單外面
+    st.markdown("---")
+    if st.button("📥 下載人員手冊", type="secondary", help="需要管理員密碼"):
+        download_members_csv()
 
+# ------ 組隊功能 ------
 st.header("📋 隊伍名單")
 teams = st.session_state.data.get("teams", [])
 all_members = st.session_state.data.get("members", {})

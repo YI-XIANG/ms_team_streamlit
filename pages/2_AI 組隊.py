@@ -229,64 +229,185 @@ def call_gemini(prompt_template: str) -> dict:
 if "data" not in st.session_state:
     st.session_state.data = load_data()
 
-st.title("🤖 AI自動分隊")
-st.subheader("已報名成員（可切換本週/下週）")
-list_week_choice = st.radio("顯示週次", ["本週", "下週"], horizontal=True, key="list_week_choice")
-today = date.today()
-start_this = get_start_of_week(today)
-week_start = start_this if list_week_choice == "本週" else start_this + timedelta(days=7)
-weekday_labels = [
-    f"星期四({(week_start + timedelta(days=0)).strftime('%m/%d')})",
-    f"星期五({(week_start + timedelta(days=1)).strftime('%m/%d')})",
-    f"星期六({(week_start + timedelta(days=2)).strftime('%m/%d')})",
-    f"星期日({(week_start + timedelta(days=3)).strftime('%m/%d')})",
-    f"星期一({(week_start + timedelta(days=4)).strftime('%m/%d')})",
-    f"星期二({(week_start + timedelta(days=5)).strftime('%m/%d')})",
-    f"星期三({(week_start + timedelta(days=6)).strftime('%m/%d')})",
-]
-weekday_plain = ["星期四","星期五","星期六","星期日","星期一","星期二","星期三"]
+st.title("🍁 AI 分組")
 
-rows = []
-show_week = week_start.strftime('%Y-%m-%d')
-for name, info in st.session_state.data.get("members", {}).items():
-    # 優先從 weekly_data 讀取該週資料
-    weekly_data = info.get("weekly_data", {}) if isinstance(info.get("weekly_data", {}), dict) else {}
-    week_obj = weekly_data.get(show_week)
-    if not week_obj:
-        # 回退舊欄位（只在同週次時顯示）
-        if info.get("weekly_week_start") != show_week:
-            continue
-        wa = info.get("weekly_availability", {}) or {}
-        pc = info.get("weekly_participation_count", "")
+# 系統說明
+st.info("💡 **AI智能分隊**：選擇要分隊的成員，AI會根據職業、等級、時間自動分配最優隊伍配置")
+
+# 初始化 session state
+if "ai_selected_members" not in st.session_state:
+    st.session_state.ai_selected_members = []
+
+st.subheader("📝 選擇分隊成員")
+
+col1, col2 = st.columns(2)
+with col1:
+    # 顯示本週/下週並附上日期區間
+    today = date.today()
+    start_this = get_start_of_week(today)
+    this_range = f"{start_this.strftime('%m/%d')} ~ {(start_this + timedelta(days=6)).strftime('%m/%d')}"
+    next_start = start_this + timedelta(days=7)
+    next_range = f"{next_start.strftime('%m/%d')} ~ {(next_start + timedelta(days=6)).strftime('%m/%d')}"
+    label_this = f"本週({this_range})"
+    label_next = f"下週({next_range})"
+    list_week_choice = st.radio("顯示週次", [label_this, label_next], horizontal=True, key="list_week_choice")
+with col2:
+    week_start = start_this if list_week_choice == label_this else start_this + timedelta(days=7)
+    weekday_labels = [
+        f"星期四({(week_start + timedelta(days=0)).strftime('%m/%d')})",
+        f"星期五({(week_start + timedelta(days=1)).strftime('%m/%d')})",
+        f"星期六({(week_start + timedelta(days=2)).strftime('%m/%d')})",
+        f"星期日({(week_start + timedelta(days=3)).strftime('%m/%d')})",
+        f"星期一({(week_start + timedelta(days=4)).strftime('%m/%d')})",
+        f"星期二({(week_start + timedelta(days=5)).strftime('%m/%d')})",
+        f"星期三({(week_start + timedelta(days=6)).strftime('%m/%d')})",
+    ]
+    weekday_plain = ["星期四","星期五","星期六","星期日","星期一","星期二","星期三"]
+
+    # 獲取所有成員資料
+    all_members = st.session_state.data.get("members", {})
+    show_week = week_start.strftime('%Y-%m-%d')
+
+    # 獲取有報名的成員資料
+    available_members = []
+    for name, info in all_members.items():
+        # 優先從 weekly_data 讀取該週資料
+        weekly_data = info.get("weekly_data", {}) if isinstance(info.get("weekly_data", {}), dict) else {}
+        week_obj = weekly_data.get(show_week)
+        if not week_obj:
+            # 回退舊欄位（只在同週次時顯示）
+            if info.get("weekly_week_start") != show_week:
+                continue
+            wa = info.get("weekly_availability", {}) or {}
+            pc = info.get("weekly_participation_count", "")
+        else:
+            wa = week_obj.get("availability", {}) or {}
+            pc = week_obj.get("participation_count", "")
+
+        # 僅顯示有報名（有任一勾選）的人
+        if any(bool(wa.get(p, False)) for p in weekday_plain):
+            participation_count_str = "" if pc in (None, "") else str(pc)
+            available_members.append({
+                "name": name,
+                "job": str(info.get("job", "")),
+                "level": str(info.get("level", "")),
+                "participation_count": participation_count_str,
+                "availability": wa
+            })
+    if st.button("📥 匯入全部", key="ai_import_all", help="一次匯入所有報名成員"):
+        st.session_state.ai_selected_members = available_members.copy()
+        st.success(f"✅ 已匯入 {len(available_members)} 位報名成員")
+        st.rerun()
+
+# 當週次切換時，清空已選擇的成員
+if "last_week_choice" not in st.session_state:
+    st.session_state.last_week_choice = list_week_choice
+elif st.session_state.last_week_choice != list_week_choice:
+    st.session_state.ai_selected_members = []
+    st.session_state.last_week_choice = list_week_choice
+    st.rerun()
+
+# 成員選擇界面
+st.markdown("**步驟1：選擇要分隊的成員**")
+
+# 下拉選擇成員
+member_options = [""] + [m["name"] for m in available_members]
+selected_member = st.selectbox("從報名成員中選擇", member_options, key="ai_member_selector", help="選擇要加入AI分隊的成員")
+
+if selected_member and st.button("➕ 加入分隊", key="ai_add_member", type="primary"):
+    if selected_member not in [m["name"] for m in st.session_state.ai_selected_members]:
+        # 找到選中成員的完整資料
+        member_data = next((m for m in available_members if m["name"] == selected_member), None)
+        if member_data:
+            st.session_state.ai_selected_members.append(member_data)
+            st.success(f"✅ 已將 {selected_member} 加入分隊名單")
+            st.rerun()
     else:
-        wa = week_obj.get("availability", {}) or {}
-        pc = week_obj.get("participation_count", "")
+        st.warning(f"⚠️ {selected_member} 已經在分隊名單中")    
 
-    # 僅顯示有報名（有任一勾選）的人
-    if not any(bool(wa.get(p, False)) for p in weekday_plain):
-        continue
+st.markdown("**步驟2：【確認名單】**")
 
-    participation_count_str = "" if pc in (None, "") else str(pc)
-    row = {
-        "名稱": name,
-        "職業": str(info.get("job", "")),
-        "等級": str(info.get("level", "")),
-        "次數": participation_count_str
-    }
-    for plain, label in zip(weekday_plain, weekday_labels):
-        row[label] = "✅" if wa.get(plain, False) else ""
-    rows.append(row)
-
-if rows:
-    df_members = pd.DataFrame(rows, columns=["名稱","職業","等級","次數"] + weekday_labels)
-    st.dataframe(df_members, use_container_width=True, hide_index=True)
+# 顯示已選擇的成員
+if st.session_state.ai_selected_members:    
+    # 統計資訊
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("已選擇成員", f"{len(st.session_state.ai_selected_members)} 人")
+    with col2:
+        levels = [int(m["level"]) for m in st.session_state.ai_selected_members if m["level"].isdigit()]
+        if levels:
+            avg_level = sum(levels) / len(levels)
+            st.metric("平均等級", f"{avg_level:.0f}")
+        else:
+            st.metric("平均等級", "N/A")
+    
+    # 建立 DataFrame
+    rows = []
+    for member in st.session_state.ai_selected_members:
+        row = {
+            "名稱": member["name"],
+            "職業": member["job"],
+            "等級": member["level"],
+            "次數": member["participation_count"]
+        }
+        for plain, label in zip(weekday_plain, weekday_labels):
+            row[label] = "✅" if member["availability"].get(plain, False) else ""
+        rows.append(row)
+    
+    df_selected = pd.DataFrame(rows, columns=["名稱","職業","等級","次數"] + weekday_labels)
+    
+    # 使用 data_editor 讓用戶可以刪除成員（固定行數，不能新增）
+    edited_df = st.data_editor(
+        df_selected,
+        key="ai_selected_members_editor",
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        column_config={
+            "名稱": st.column_config.TextColumn("名稱", disabled=True),
+            "職業": st.column_config.TextColumn("職業", disabled=True),
+            "等級": st.column_config.TextColumn("等級", disabled=True),
+            "次數": st.column_config.TextColumn("次數", disabled=True),
+            **{label: st.column_config.TextColumn(label, disabled=True) for label in weekday_labels}
+        }
+    )
+    
+    # 檢查是否有成員被刪除
+    if len(edited_df) < len(st.session_state.ai_selected_members):
+        # 找出被刪除的成員
+        current_names = set(edited_df["名稱"].tolist())
+        original_names = set(member["name"] for member in st.session_state.ai_selected_members)
+        removed_names = original_names - current_names
+        
+        # 更新 session state
+        st.session_state.ai_selected_members = [
+            member for member in st.session_state.ai_selected_members 
+            if member["name"] in current_names
+        ]
+        
+        if removed_names:
+            st.success(f"✅ 已移除成員：{', '.join(removed_names)}")
+            st.rerun()
+    
+    # 操作按鈕
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🗑️ 清空所有選擇", key="ai_clear_all", help="移除所有已選擇的成員"):
+            st.session_state.ai_selected_members = []
+            st.success("✅ 已清空所有選擇的成員")
+            st.rerun()
+    
+    st.markdown("---")
+        
 else:
-    st.info("所選週次尚無成員勾選可參加日期。")
+    st.info("💡 尚未選擇任何成員。請使用上方下拉選單選擇成員，或點擊「匯入全部」按鈕。")
 
-## AutoAI 按鈕與結果顯示
-with st.expander("管理員使用功能", expanded=False):
-    pwd_input = st.text_input("密碼以啟用 AI 功能", type="password", key="autoai_pwd")
-    ctrl1, ctrl2, ctrl3 = st.columns([1,1,1])
+# AI 分隊生成功能
+st.markdown("**步驟3：【AI分組】**")
+with st.expander("🔐 管理員功能", expanded=False):
+    st.markdown("**需要管理員權限才能使用AI分隊功能**")
+    pwd_input = st.text_input("管理員密碼", type="password", key="autoai_pwd", help="輸入管理員密碼以啟用AI功能")
+    ctrl1, ctrl2 = st.columns(2)
 
 def get_member_info_by_name(name: str) -> Dict:
     info = st.session_state.data.get("members", {}).get(name, {})
@@ -382,38 +503,46 @@ def _normalize_time_label_with_weekday(time_label: str, week_start: date) -> str
 
 
 with ctrl1:
-    if st.button("使用 AutoAI 生成", key="autoai_btn"):
+    if st.button("✨ AI 分組", key="autoai_btn", type="primary", help="使用AI智能分析生成最優隊伍配置"):
         correct_pwd = st.secrets.get("setting", {}).get("pwd")
         if correct_pwd is None or pwd_input != correct_pwd:
-            st.error("密碼錯誤，無法執行 AutoAI。")
+            st.error("❌ 密碼錯誤，無法執行 AI 分組功能")
             st.stop()
-        markdown_table = dataframe_to_markdown(pd.DataFrame(rows)) if rows else ""
+        
+        # 使用手動選擇的成員資料
+        if not st.session_state.ai_selected_members:
+            st.error("❌ 請先選擇要分組的成員！")
+            st.stop()
+        
+        # 建立成員資料的 DataFrame
+        ai_rows = []
+        for member in st.session_state.ai_selected_members:
+            row = {
+                "名稱": member["name"],
+                "職業": member["job"],
+                "等級": member["level"],
+                "次數": member["participation_count"]
+            }
+            for plain, label in zip(weekday_plain, weekday_labels):
+                row[label] = "✅" if member["availability"].get(plain, False) else ""
+            ai_rows.append(row)
+        
+        markdown_table = dataframe_to_markdown(pd.DataFrame(ai_rows)) if ai_rows else ""
         prompt_template = system_prompt.format(markdown=markdown_table)
         result = call_gemini(prompt_template)
         week_key = show_week
         ai_data = load_ai_teams()
         ai_data[week_key] = normalize_ai_result(result)
         save_ai_teams(ai_data)
-        st.success("AI 生成結果已寫入 AI 分隊資料表！")
+        st.success("✅ AI 分隊生成完成！結果已儲存至分隊資料表")
 
 with ctrl2:
-    if st.button("新增空白隊伍", key="ai_add_team"):
-        week_key = show_week
-        ai_data = load_ai_teams()
-        current = ai_data.get(week_key, [])
-        new_idx = len(current) + 1
-        current.append({"team_name": f"AI自動分隊 {new_idx}", "member": []})
-        ai_data[week_key] = current
-        save_ai_teams(ai_data)
-        st.success("已新增空白隊伍。")
-
-with ctrl3:
-    if st.button("刪除所有隊伍", key="ai_delete_all"):
+    if st.button("🗑️ 清空所有隊伍", key="ai_delete_all", help="刪除本週所有AI分隊"):
         week_key = show_week
         ai_data = load_ai_teams()
         ai_data[week_key] = []
         save_ai_teams(ai_data)
-        st.success("已清空本週 AI 分隊。")
+        st.success("✅ 已清空本週所有 AI 分隊")
 
 st.markdown("---")
 st.subheader("AI 分隊編輯")
@@ -421,7 +550,7 @@ ai_data = load_ai_teams()
 week_teams = ai_data.get(show_week, [])
 
 if not week_teams:
-    st.info("此週尚無 AI 分隊資料。可先使用 AutoAI 生成或新增空白隊伍。")
+    st.info("此週尚無 AI 分隊資料。")
 else:
     all_member_names = [""] + sorted(list(st.session_state.data.get("members", {}).keys()))
     for idx, team in enumerate(week_teams):

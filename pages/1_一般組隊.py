@@ -58,7 +58,6 @@ def get_default_schedule_for_week():
     return {
         "proposed_slots": {},
         "availability": {UNAVAILABLE_KEY: []},
-        "final_time": "",
     }
 
 
@@ -85,10 +84,8 @@ def save_data(data):
 def build_team_text(team):
     today = date.today()
     start_of_this_week_str = get_start_of_week(today).strftime('%Y-%m-%d')
-    this_week_schedule = team.get('schedules', {}).get(start_of_this_week_str, {})
-    final_time = this_week_schedule.get('final_time', '')
-    time_display = final_time if final_time else "時間待定"
     remark = team.get('team_remark', '')
+    time_display = remark if remark else "時間待定"
     title = f"【{team['team_name']} 徵人】"
     time = f"時間：{time_display}"
     remark_text = f"備註：{remark}" if remark else ""
@@ -119,11 +116,48 @@ def generate_weekly_schedule_days(start_date: date) -> list[str]:
     return schedule_days
 
 
-st.title("📋 手動分隊")
+st.title("📋 手動分組")
+
+# 系統說明
+st.info("💡 **手動分隊**：建立和管理隊伍，手動安排成員加入，適合精確控制隊伍配置")
 
 data = load_data()
 teams = data.get("teams", [])
 all_members = data.get("members", {})
+
+# 搜尋功能
+st.subheader("🔍 成員隊伍查詢")
+member_names_for_search = [""] + sorted(list(all_members.keys()))
+selected_member_for_search = st.selectbox(
+    "選擇成員查看其參與的隊伍",
+    member_names_for_search,
+    key="member_search_manual",
+    help="快速查詢特定成員目前參與的所有隊伍"
+)
+
+if selected_member_for_search:
+    # 查找該成員參與的所有隊伍
+    participating_teams = []
+    for idx, team in enumerate(teams):
+        team_members = [m.get("name", "") for m in team.get("member", [])]
+        if selected_member_for_search in team_members:
+            # 獲取該成員在隊伍中的詳細資訊
+            member_info = next((m for m in team.get("member", []) if m.get("name") == selected_member_for_search), {})
+            participating_teams.append({
+                "隊伍名稱": team.get("team_name", f"隊伍 {idx+1}"),
+                "職業": member_info.get("job", ""),
+                "隊伍編號": f"第{idx+1}隊"
+            })
+    
+    if participating_teams:
+        df_participating = pd.DataFrame(participating_teams)
+        st.dataframe(df_participating, use_container_width=True, hide_index=True)
+        st.success(f"✅ 找到 {len(participating_teams)} 個隊伍包含 {selected_member_for_search}")
+    else:
+        st.info(f"ℹ️ {selected_member_for_search} 目前沒有參與任何隊伍")
+
+st.markdown("---")
+
 member_names_for_team_select = [""] + sorted(list(all_members.keys()))
 
 today = date.today()
@@ -143,22 +177,43 @@ for idx, team in enumerate(teams):
     view_week_start_date = datetime.strptime(view_week_start_str, '%Y-%m-%d').date()
 
     schedule_to_display = team.get("schedules", {}).get(view_week_start_str, get_default_schedule_for_week())
-    final_time = schedule_to_display.get('final_time')
+    team_time_remark = team.get('team_remark', '')
 
-    expander_label = f"🍁 **{team['team_name']}**｜📅 **最終時間：{final_time}**" if final_time else f"🍁 **{team['team_name']}**"
-    with st.expander(expander_label):
-        member_count = sum(1 for m in team.get("member", []) if m.get("name"))
-        c1, c2 = st.columns([3, 1])
-        c1.progress(member_count / MAX_TEAM_SIZE, text=f"👥 人數: {member_count} / {MAX_TEAM_SIZE}")
-        c2.info(f"✨ 尚缺 {MAX_TEAM_SIZE - member_count} 人" if member_count < MAX_TEAM_SIZE else "🎉 人數已滿")
+    # 隊伍狀態資訊
+    member_count = sum(1 for m in team.get("member", []) if m.get("name"))
+    status_icon = "🎉" if member_count >= MAX_TEAM_SIZE else "⏳" if member_count > 0 else "📝"
+    time_info = f"｜⏰ {team_time_remark}" if team_time_remark else "｜⏰ 時間待定"
+    
+    expander_label = f"{status_icon} **{team['team_name']}** {time_info}"
+    with st.expander(expander_label, expanded=False):
+        # 隊伍統計
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            progress_value = member_count / MAX_TEAM_SIZE
+            st.progress(progress_value, text=f"👥 成員: {member_count}/{MAX_TEAM_SIZE}")
+        with col2:
+            if member_count < MAX_TEAM_SIZE:
+                st.metric("尚缺人數", f"{MAX_TEAM_SIZE - member_count} 人")
+            else:
+                st.metric("隊伍狀態", "已滿員")
+        with col3:
+            if team_time_remark:
+                st.metric("活動時間", team_time_remark)
+            else:
+                st.metric("活動時間", "待定")
+        
         st.markdown("---")
 
         tab1, = st.tabs(["**👥 成員名單**"])
 
         with tab1:
-            # 週次切換（本週 / 下週），影響下方 DataFrame 的日期欄位與可參加勾選來源
-            view_choice = st.radio("顯示週次", ["本週", "下週"], horizontal=True, key=f"member_list_week_{idx}")
-            week_start_date = start_of_this_week if view_choice == "本週" else (start_of_this_week + timedelta(days=7))
+            # 週次切換（本週 / 下週），顯示日期範圍
+            this_range = get_week_range(start_of_this_week)
+            next_range = get_week_range(start_of_this_week + timedelta(days=7))
+            label_this = f"本週({this_range})"
+            label_next = f"下週({next_range})"
+            view_choice = st.radio("顯示週次", [label_this, label_next], horizontal=True, key=f"member_list_week_{idx}")
+            week_start_date = start_of_this_week if view_choice == label_this else (start_of_this_week + timedelta(days=7))
             week_key_str = week_start_date.strftime('%Y-%m-%d')
             weekday_plain = ["星期四", "星期五", "星期六", "星期日", "星期一", "星期二", "星期三"]
             weekday_with_date = [
@@ -173,7 +228,7 @@ for idx, team in enumerate(teams):
             with st.form(f"team_form_{idx}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 team_name = c1.text_input("隊伍名稱", value=team["team_name"], key=f"name_{idx}")
-                team_remark = c2.text_input("隊伍備註", value=team.get("team_remark", ""), key=f"remark_{idx}", help="主要時間請至「時間調查」分頁設定")
+                team_remark = c2.text_input("隊伍時間", value=team.get("team_remark", ""), key=f"remark_{idx}", help="主要時間請至「時間調查」分頁設定")
                 st.write("**編輯隊伍成員 (請由名稱欄位選擇)：**")
 
                 current_members_list = team.get("member", [])
@@ -220,7 +275,7 @@ for idx, team in enumerate(teams):
                 )
                 st.markdown("---")
 
-                btn_cols = st.columns([2, 1, 1, 2])
+                btn_cols = st.columns([2, 1, 1])
                 if btn_cols[0].form_submit_button(f"💾 儲存變更", type="primary", use_container_width=True):
                     updated_members = [
                         {"name": row["名稱"], **all_members.get(row["名稱"], {})} if row["名稱"] else {"name": "", "job": "", "level": "", "atk": ""}
@@ -250,10 +305,10 @@ for idx, team in enumerate(teams):
 
         # 移除「時間調查」頁籤與相關功能
 
-st.header("➕ 建立新隊伍")
+st.subheader("➕ 建立新隊伍")
 with st.form("add_team_form", clear_on_submit=True):
-    new_team_name_input = st.text_input("新隊伍名稱")
-    if st.form_submit_button("建立隊伍"):
+    new_team_name_input = st.text_input("隊伍名稱", placeholder="請輸入新隊伍名稱", help="為你的隊伍取一個有意義的名稱")
+    if st.form_submit_button("🚀 建立隊伍", type="primary", use_container_width=True):
         if new_team_name_input:
             new_schedules = {
                 start_of_this_week_str: get_default_schedule_for_week(),
@@ -269,8 +324,9 @@ with st.form("add_team_form", clear_on_submit=True):
                 "schedules": new_schedules
             })
             save_data(data)
-            st.success(f"已成功建立新隊伍：{new_team_name_input}！")
+            st.success(f"✅ 已成功建立新隊伍：{new_team_name_input}！")
+            st.rerun()
         else:
-            st.warning("請輸入隊伍名稱！")
+            st.warning("⚠️ 請輸入隊伍名稱！")
 
 

@@ -201,10 +201,15 @@ def render_global_weekly_availability():
     """Render 本週與下週可參加名單（唯讀）。"""
     st.markdown("---")
     st.subheader("全局：本週與下週可參加名單（唯讀）")
-    week_view = st.radio("檢視週次", ["本週", "下週"], horizontal=True)
     today = date.today()
     start_this = get_start_of_week(today)
-    week_start = start_this if week_view == "本週" else start_this + timedelta(days=7)
+    this_range = f"{start_this.strftime('%m/%d')} ~ {(start_this + timedelta(days=6)).strftime('%m/%d')}"
+    next_start = start_this + timedelta(days=7)
+    next_range = f"{next_start.strftime('%m/%d')} ~ {(next_start + timedelta(days=6)).strftime('%m/%d')}"
+    label_this = f"本週({this_range})"
+    label_next = f"下週({next_range})"
+    week_view = st.radio("檢視週次", [label_this, label_next], horizontal=True)
+    week_start = start_this if week_view == label_this else start_this + timedelta(days=7)
     week_days = generate_weekly_schedule_days(week_start)
 
     rows = []
@@ -318,52 +323,39 @@ def sync_data_and_save():
     save_data(st.session_state.data)
 
 # --- UI 介面 ---
-st.title("🍁 Monarchs公會組隊系統 🍁")
+st.title("🍁 Monarchs 公會組隊系統")
 
-with st.expander("📝 系統介紹與說明"):
-    st.markdown(
-        f"""
-        ### 本週區間：{get_week_range(date.today())}
-        #### **組隊流程**
-        1. **【註冊角色】** 在下方的 **👤 公會成員表** 註冊或更新你的角色資料。
-        2. **【加入隊伍】** 找到想加入的隊伍，在「成員名單」分頁中從下拉選單選擇你的名字，並 **【💾 儲存變更】**。
-        3. **【每週回報時間】**
-           - 在「時間調查」分頁，可使用 **◀️** 和 **▶️** 按鈕切換【本週】與【下週】時段。**切換週次不會清除已填寫的資料**。
-           - **隊長**在「步驟1」設定該週可行的時段。若時段未變更，成員回報不會被重置；若只修改部分時段，也僅有被修改的時段會重置回報。
-           - **隊員**在「步驟2」勾選自己可以的時間。
-        <span style="color:red;">※ 注意事項：系統會自動管理本週與下週的資料，每週四凌晨會自動輪替。</span>
-        """, unsafe_allow_html=True)
+
+# 快速導航
+st.subheader(f"🚀本週區間：{get_week_range(date.today())} ")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+    **👤 註冊角色**  
+    建立你的遊戲角色資料，包含職業、等級、表攻等資訊
+    """)
+
+with col2:
+    st.markdown("""
+    **📋 手動分隊**  
+    建立和管理隊伍，手動安排成員加入
+    """)
+
+with col3:
+    st.markdown("""
+    **🤖 AI自動分隊**  
+    使用AI智能分析，自動分配最優隊伍配置
+    """)
+
+st.markdown("---")
 
 # ------ 註冊功能 ------
 st.header("👤 公會成員表")
 if "profile_expander_open" not in st.session_state:
-    st.session_state.profile_expander_open = True
+    st.session_state.profile_expander_open = False
 with st.expander("點此註冊或更新你的個人資料", expanded=st.session_state.profile_expander_open):
     all_members = st.session_state.data.get("members", {})
-
-    # 週次切換 與 次數：放在表單外同一列，切換時可即時重繪日期勾選
-    ctrl_col1, ctrl_col2 = st.columns([3, 1])
-    # 週次切換
-    today_date = date.today()
-    start_this_thu = get_start_of_week(today_date)
-    start_next_thu = start_this_thu + timedelta(days=7)
-    week_choice = ctrl_col1.radio("填寫週次", ["本週", "下週"], horizontal=True, key="member_week_choice")
-    start_thu_external = start_this_thu if week_choice == "本週" else start_next_thu
-    # 次數預設（沿用該會員最近填寫的數值），依目前已選的 ID（若尚未選擇則使用 1）
-    week_key_external = start_thu_external.strftime('%Y-%m-%d')
-    current_input_id = st.session_state.get("member_id_input_main")
-    if current_input_id and current_input_id in all_members:
-        _info = all_members.get(current_input_id, {})
-        _wdata = _info.get("weekly_data", {}) if isinstance(_info.get("weekly_data", {}), dict) else {}
-        if str(_wdata.get(week_key_external, {}).get("participation_count", "")).isdigit():
-            participation_count_default = int(_wdata.get(week_key_external, {}).get("participation_count", 1))
-        elif str(_info.get("weekly_participation_count", "")).isdigit():
-            participation_count_default = int(_info.get("weekly_participation_count", 1))
-        else:
-            participation_count_default = 1
-    else:
-        participation_count_default = 1
-    participation_count_input = ctrl_col2.selectbox("次數", options=[1, 2], index=[1,2].index(participation_count_default), key="member_participation_count", help="參與次數（依週次紀錄）")
 
     # 選單選擇既有ID後自動帶入到輸入框（放在表單外，避免 on_change 限制）
     def _on_pick_existing_member():
@@ -371,9 +363,8 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
         if picked and picked != "<創建成員>":
             st.session_state["member_id_input_main"] = picked
         else:
-            # 進入新建模式：清空欄位與次數
+            # 進入新建模式：清空欄位
             st.session_state["member_id_input_main"] = ""
-            st.session_state["member_participation_count"] = 1
         st.session_state.profile_expander_open = True
 
     member_options = sorted(list(all_members.keys()))
@@ -385,76 +376,39 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
     )
 
     with st.form("member_form", clear_on_submit=False):
-        c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 1, 1, 1, 1])
+        c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
         # 遊戲ID：選到既有成員時不可編輯；創建模式可輸入
         member_id_input = c1.text_input("遊戲ID", key="member_id_input_main", disabled=st.session_state.get("member_id_input_main", "") in all_members)
         selected_member_name = member_id_input if member_id_input in all_members else ""
         default_info = all_members.get(selected_member_name, {"job": "", "level": "", "atk": "", "is_guild_member": True})
         job_index = JOB_SELECT_LIST.index(default_info.get("job", "")) if default_info.get("job") in JOB_SELECT_LIST else 0
-        is_existing = bool(selected_member_name)
         job_input = c2.selectbox("職業", options=JOB_SELECT_LIST, index=job_index, disabled=False)
         level_input = c3.text_input("等級", value=default_info.get("level", ""))
         atk_input = c4.text_input("表攻 (乾表)", value=default_info.get("atk", ""))
         is_guild_member = c5.checkbox("公會成員", value=default_info.get("is_guild_member", True), help="勾選表示為公會正式成員")
-        # c6 位置保留，不再重複顯示「次數」
 
         st.markdown("---")
-        # 每週可參加日期（週四 -> 下週三），依表單外週次切換連動
-        start_thu = start_thu_external
-        day_names = ["星期四", "星期五", "星期六", "星期日", "星期一", "星期二", "星期三"]
-        days = [(start_thu + timedelta(days=i), day_names[i]) for i in range(7)]
-        cols = st.columns(7)
-        # 僅在同一週次時才預填上次資料（優先從 weekly_data 取）
-        week_key = start_thu.strftime('%Y-%m-%d')
-        # 依當前選擇的成員，抓取該成員於該週的預設
-        weekly_data_default = default_info.get("weekly_data", {}) if isinstance(default_info.get("weekly_data", {}), dict) else {}
-        weekly_default = {}
-        if week_key in weekly_data_default:
-            weekly_default = weekly_data_default.get(week_key, {}).get("availability", {}) or {}
-        elif default_info.get("weekly_week_start") == week_key:
-            weekly_default = default_info.get("weekly_availability", {}) or {}
-        weekly_availability = {}
-        for i, (d, label) in enumerate(days):
-            weekly_availability[label] = cols[i].checkbox(f"{label}\n{d.strftime('%m/%d')}", value=bool(weekly_default.get(label, False)))
-
-        button_cols = st.columns([3, 1, 1, 1])
-        if button_cols[0].form_submit_button("💾 儲存角色資料", use_container_width=True):
+        btn_cols = st.columns([3, 1])
+        if btn_cols[0].form_submit_button("💾 儲存角色資料", use_container_width=True):
             final_name = (member_id_input or "").strip()
             if not final_name:
                 st.warning("請務必填寫遊戲ID！")
             else:
                 member_dict = st.session_state.data.setdefault("members", {}).get(final_name, {})
-                now_iso = datetime.now().isoformat(timespec="seconds")
-                week_key = start_thu.strftime('%Y-%m-%d')
-                # 儲存基本資料
+                # 僅儲存基本資料（不動每週報名資料）
                 member_dict.update({
                     "job": job_input,
                     "level": level_input,
                     "atk": atk_input,
                     "is_guild_member": is_guild_member,
                 })
-                # 新結構：依週次儲存
-                weekly_data = member_dict.setdefault("weekly_data", {})
-                weekly_data[week_key] = {
-                    "availability": weekly_availability,
-                    "participation_count": st.session_state.get("member_participation_count", 1),
-                    "last_updated": now_iso,
-                }
-                # 舊欄位（相容既有頁面）：同步為當前週次資料
-                member_dict.update({
-                    "weekly_availability": weekly_availability,
-                    "weekly_last_updated": now_iso,
-                    "weekly_week_start": week_key,
-                    "weekly_participation_count": st.session_state.get("member_participation_count", 1),
-                })
-                # 寫回成員
                 st.session_state.data["members"][final_name] = member_dict
                 sync_data_and_save()
                 st.success(f"角色 '{final_name}' 的資料已儲存！")
                 st.session_state.profile_expander_open = True
                 st.rerun()
 
-        if selected_member_name and button_cols[1].form_submit_button("🗑️ 刪除此角色", use_container_width=True):
+        if selected_member_name and btn_cols[1].form_submit_button("🗑️ 刪除此角色", use_container_width=True):
             del st.session_state.data["members"][selected_member_name]
             # 同步刪除隊伍中的成員
             for team_idx in range(len(st.session_state.data['teams'])):
@@ -471,13 +425,103 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
     if st.button("📥 下載人員手冊", type="secondary", help="需要管理員密碼"):
         download_members_csv()
 
-    # 全局顯示移至下方統一區塊
+st.markdown("---")
 
-st.subheader("已報名成員（可切換本週/下週）")
-list_week_choice = st.radio("顯示週次", ["本週", "下週"], horizontal=True, key="list_week_choice")
+# ------ 每週報名（快速） ------
+st.header("📅 每週報名")
+signup_cols = st.columns([3, 1])
+all_members = st.session_state.data.get("members", {})
+
+# 快速選擇ID（搜尋 + 記住上次選擇）
+default_member_idx = 0
+member_keys_sorted = sorted(list(all_members.keys()))
+if "last_signup_member" in st.session_state and st.session_state["last_signup_member"] in member_keys_sorted:
+    default_member_idx = member_keys_sorted.index(st.session_state["last_signup_member"]) + 1
+
+selected_member_for_signup = signup_cols[0].selectbox(
+    "選擇你的遊戲ID（若無請先於上方註冊）",
+    options=[""] + member_keys_sorted,
+    index=default_member_idx,
+    key="weekly_signup_member_select",
+    help="此處只需選擇ID並勾選可參加的時間與次數"
+)
+
+this_range_q = f"{get_start_of_week(date.today()).strftime('%m/%d')} ~ {(get_start_of_week(date.today()) + timedelta(days=6)).strftime('%m/%d')}"
+next_start_q = get_start_of_week(date.today()) + timedelta(days=7)
+next_range_q = f"{next_start_q.strftime('%m/%d')} ~ {(next_start_q + timedelta(days=6)).strftime('%m/%d')}"
+label_this_q = f"本週({this_range_q})"
+label_next_q = f"下週({next_range_q})"
+week_choice_quick = signup_cols[1].radio("週次", [label_this_q, label_next_q], horizontal=True, key="weekly_signup_week_choice")
+
+if selected_member_for_signup:
+    st.session_state["last_signup_member"] = selected_member_for_signup
+
+    start_thu_quick = get_start_of_week(date.today()) if week_choice_quick == label_this_q else (get_start_of_week(date.today()) + timedelta(days=7))
+    week_key_quick = start_thu_quick.strftime('%Y-%m-%d')
+
+    # 預設參與次數
+    info_q = all_members.get(selected_member_for_signup, {})
+    _wdata_q = info_q.get("weekly_data", {}) if isinstance(info_q.get("weekly_data", {}), dict) else {}
+    if str(_wdata_q.get(week_key_quick, {}).get("participation_count", "")).isdigit():
+        participation_default_q = int(_wdata_q.get(week_key_quick, {}).get("participation_count", 1))
+    elif str(info_q.get("weekly_participation_count", "")).isdigit():
+        participation_default_q = int(info_q.get("weekly_participation_count", 1))
+    else:
+        participation_default_q = 1
+
+    c_top1, c_top2 = st.columns([3, 1])
+    participation_count_q = c_top2.selectbox("本週參與次數", options=[1, 2], index=[1,2].index(participation_default_q), key="weekly_signup_participation")
+
+    # 日期勾選（快速）
+    day_names_q = ["星期四", "星期五", "星期六", "星期日", "星期一", "星期二", "星期三"]
+    days_q = [(start_thu_quick + timedelta(days=i), day_names_q[i]) for i in range(7)]
+
+    # 預設值（依該成員該週資料）
+    weekly_default_q = {}
+    if week_key_quick in _wdata_q:
+        weekly_default_q = _wdata_q.get(week_key_quick, {}).get("availability", {}) or {}
+    elif info_q.get("weekly_week_start") == week_key_quick:
+        weekly_default_q = info_q.get("weekly_availability", {}) or {}
+
+    cols_q = st.columns(7)
+    weekly_availability_q = {}
+    for i, (d, label) in enumerate(days_q):
+        weekly_availability_q[label] = cols_q[i].checkbox(f"{label}\n{d.strftime('%m/%d')}", value=bool(weekly_default_q.get(label, False)), key=f"weekly_q_{label}")
+
+    if st.button("📨 送出本次報名", type="primary", use_container_width=True):
+        now_iso_q = datetime.now().isoformat(timespec="seconds")
+        member_dict_q = st.session_state.data.setdefault("members", {}).get(selected_member_for_signup, {})
+        weekly_data_q = member_dict_q.setdefault("weekly_data", {})
+        weekly_data_q[week_key_quick] = {
+            "availability": weekly_availability_q,
+            "participation_count": participation_count_q,
+            "last_updated": now_iso_q,
+        }
+        # 舊欄位同步（相容）
+        member_dict_q.update({
+            "weekly_availability": weekly_availability_q,
+            "weekly_last_updated": now_iso_q,
+            "weekly_week_start": week_key_quick,
+            "weekly_participation_count": participation_count_q,
+        })
+        st.session_state.data["members"][selected_member_for_signup] = member_dict_q
+        sync_data_and_save()
+        st.success("✅ 已送出報名！")
+        st.rerun()
+
+
+st.markdown("---")
+
+st.subheader("🙋已報名成員")
 today = date.today()
 start_this = get_start_of_week(today)
-week_start = start_this if list_week_choice == "本週" else start_this + timedelta(days=7)
+this_range_l = f"{start_this.strftime('%m/%d')} ~ {(start_this + timedelta(days=6)).strftime('%m/%d')}"
+next_start_l = start_this + timedelta(days=7)
+next_range_l = f"{next_start_l.strftime('%m/%d')} ~ {(next_start_l + timedelta(days=6)).strftime('%m/%d')}"
+label_this_l = f"本週({this_range_l})"
+label_next_l = f"下週({next_range_l})"
+list_week_choice = st.radio("顯示週次", [label_this_l, label_next_l], horizontal=True, key="list_week_choice")
+week_start = start_this if list_week_choice == label_this_l else start_this + timedelta(days=7)
 weekday_labels = [
     f"星期四({(week_start + timedelta(days=0)).strftime('%m/%d')})",
     f"星期五({(week_start + timedelta(days=1)).strftime('%m/%d')})",

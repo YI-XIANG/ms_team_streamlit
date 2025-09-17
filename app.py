@@ -70,13 +70,10 @@ def _get_rtdb_ref():
 
 def get_start_of_week(base_date: date) -> date:
     """計算給定日期所在週的星期四是哪一天。
-    若今天為星期一，為符合需求自動跳至下一週的星期四（本週9/11 -> 9/18 的情況）。
+    週期為星期四至星期三，不做額外跳週調整。
     """
     days_since_thu = (base_date.weekday() - 3) % 7
     start = base_date - timedelta(days=days_since_thu)
-    # 若今天是星期一，跳至下週的星期四
-    if base_date.weekday() == 0:  # Monday
-        start = start + timedelta(days=7)
     return start
 
 def get_default_schedule_for_week():
@@ -152,25 +149,6 @@ def save_data(data):
         ref.set(data)
     except Exception as e:
         st.error(f"❌ 儲存資料時發生未預期的錯誤：{e}")
-
-def reset_weekly_availability_if_monday(data: dict) -> dict:
-    """每週一清空所有成員的 weekly_availability，並以日期標記避免重複執行。"""
-    try:
-        today_date = date.today()
-        if today_date.weekday() != 0:  # 0 = Monday
-            return data
-        today_str = today_date.strftime('%Y-%m-%d')
-        if data.get("weekly_reset_marker") == today_str:
-            return data
-        for _, info in data.get("members", {}).items():
-            info["weekly_availability"] = {}
-            info["weekly_last_updated"] = ""
-            info["weekly_week_start"] = get_start_of_week(today_date).strftime('%Y-%m-%d')
-        data["weekly_reset_marker"] = today_str
-        save_data(data)
-    except Exception:
-        pass
-    return data
 
 def build_team_text(team):
     """產生用於複製到 Discord 的隊伍資訊文字"""
@@ -313,7 +291,6 @@ def download_members_csv():
 # --- 初始化 Session State & 同步函式 ---
 if "data" not in st.session_state:
     st.session_state.data = load_data()
-    st.session_state.data = reset_weekly_availability_if_monday(st.session_state.data)
 
 if "team_view_week" not in st.session_state:
     st.session_state.team_view_week = {}

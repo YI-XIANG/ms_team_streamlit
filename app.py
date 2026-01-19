@@ -24,6 +24,15 @@ JOB_OPTIONS = {
 }
 JOB_SELECT_LIST = [job for sublist in JOB_OPTIONS.values() for job in sublist]
 UNAVAILABLE_KEY = "__UNAVAILABLE__"
+DUNGEON_OPTIONS = ["拉圖斯", "殘暴炎魔"]
+DEFAULT_DUNGEON = DUNGEON_OPTIONS[0]
+
+
+def normalize_dungeon(dungeon: str) -> str:
+    """將輸入的副本名稱修正為合法值，預設為 DEFAULT_DUNGEON。"""
+    if isinstance(dungeon, str) and dungeon in DUNGEON_OPTIONS:
+        return dungeon
+    return DEFAULT_DUNGEON
 
 # --- 核心函式 ---
 
@@ -84,6 +93,57 @@ def get_default_schedule_for_week():
         "final_time": "",
     }
 
+
+def _upgrade_dungeon_schema(data: dict):
+    """資料升級：為隊伍與每週報名增加副本欄位，預設為 DEFAULT_DUNGEON。"""
+    if not isinstance(data, dict):
+        return {"teams": [], "members": {}}
+
+    # 隊伍副本欄位
+    for team in data.get("teams", []):
+        team["dungeon"] = normalize_dungeon(team.get("dungeon", DEFAULT_DUNGEON))
+
+    # 成員每週資料副本欄位（支援多副本）
+    members = data.get("members", {})
+    for _, info in members.items():
+        fallback_dungeon = normalize_dungeon(info.get("weekly_dungeon", info.get("dungeon", DEFAULT_DUNGEON)))
+        info["weekly_dungeon"] = fallback_dungeon
+        weekly_data = info.get("weekly_data", {})
+        if not isinstance(weekly_data, dict):
+            info["weekly_data"] = {}
+            continue
+        for week_key, week_obj in list(weekly_data.items()):
+            # 若不是 dict，直接重置
+            if not isinstance(week_obj, dict):
+                weekly_data[week_key] = {}
+                continue
+
+            # 若已是「多副本」結構（key 為副本名稱，value 為 dict）
+            if any(isinstance(v, dict) and k in DUNGEON_OPTIONS for k, v in week_obj.items()):
+                for dungeon_name, dungeon_obj in week_obj.items():
+                    if not isinstance(dungeon_obj, dict):
+                        week_obj[dungeon_name] = {}
+                        dungeon_obj = week_obj[dungeon_name]
+                    # 確保子物件內部結構存在
+                    dungeon_obj.setdefault("availability", {})
+                    dungeon_obj.setdefault("participation_count", "")
+                    dungeon_obj.setdefault("last_updated", "")
+                continue
+
+            # 舊結構：單一物件，含 availability/participation_count/dungeon 等欄位
+            dungeon_name = normalize_dungeon(week_obj.get("dungeon", fallback_dungeon))
+            new_entry = {
+                dungeon_name: {
+                    "availability": week_obj.get("availability", {}),
+                    "participation_count": week_obj.get("participation_count", ""),
+                    "last_updated": week_obj.get("last_updated", ""),
+                }
+            }
+            weekly_data[week_key] = new_entry
+
+    return data
+
+
 def load_data():
     """從 Firebase 載入、遷移並驗證資料結構（使用 Admin SDK）。"""
     try:
@@ -134,7 +194,8 @@ def load_data():
             else:
                 team.setdefault("team_remark", "")
 
-        return data
+        # 升級資料結構：加入副本欄位
+        return _upgrade_dungeon_schema(data)
 
     except Exception as e:
         st.error(f"❌ 載入資料時發生未預期的錯誤：{e}, {e.__traceback__.tb_lineno}")
@@ -157,9 +218,11 @@ def build_team_text(team):
     this_week_schedule = team.get('schedules', {}).get(start_of_this_week_str, {})
     final_time = this_week_schedule.get('final_time', '')
     time_display = final_time if final_time else "時間待定"
+    dungeon = normalize_dungeon(team.get("dungeon", DEFAULT_DUNGEON))
     remark = team.get('team_remark', '')
 
     title = f"【{team['team_name']} 徵人】"
+    dungeon_line = f"副本：{dungeon}"
     time = f"時間：{time_display}"
     remark_text = f"備註：{remark}" if remark else ""
 
@@ -173,7 +236,7 @@ def build_team_text(team):
     missing_count = MAX_TEAM_SIZE - len(current_members)
     missing_text = f"📋 尚缺 {missing_count} 人，歡迎私訊！" if missing_count > 0 else "🎉 隊伍已滿，可先排後補！"
 
-    return "\n\n".join(filter(None, [title, time, remark_text, member_text, missing_text])).strip()
+    return "\n\n".join(filter(None, [title, dungeon_line, time, remark_text, member_text, missing_text])).strip()
 
 def render_global_weekly_availability():
     """Render 本週與下週可參加名單（唯讀）。"""
@@ -305,7 +368,7 @@ st.title("🍁 Monarchs 公會組隊系統")
 
 # 快速導航
 st.subheader(f"🚀本週區間：{get_week_range(date.today())} ")
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("""
@@ -317,12 +380,6 @@ with col2:
     st.markdown("""
     **📋 手動分隊**  
     建立和管理隊伍，手動安排成員加入
-    """)
-
-with col3:
-    st.markdown("""
-    **🤖 AI自動分隊**  
-    使用AI智能分析，自動分配最優隊伍配置
     """)
 
 st.markdown("---")
@@ -406,7 +463,7 @@ st.markdown("---")
 
 # ------ 每週報名（快速） ------
 st.header("📅 每週報名")
-signup_cols = st.columns([3, 1])
+signup_cols = st.columns([1, 1, 1, 1])
 all_members = st.session_state.data.get("members", {})
 
 # 快速選擇ID（搜尋 + 記住上次選擇）
@@ -430,24 +487,64 @@ label_this_q = f"本週({this_range_q})"
 label_next_q = f"下週({next_range_q})"
 week_choice_quick = signup_cols[1].radio("週次", [label_this_q, label_next_q], horizontal=True, key="weekly_signup_week_choice")
 
+start_thu_quick = get_start_of_week(date.today()) if week_choice_quick == label_this_q else (get_start_of_week(date.today()) + timedelta(days=7))
+week_key_quick = start_thu_quick.strftime('%Y-%m-%d')
+
+def _get_member_default_dungeon(info_dict, week_key):
+    """取得成員在該週的預設副本選擇。"""
+    if not isinstance(info_dict, dict):
+        return DEFAULT_DUNGEON
+    weekly_data = info_dict.get("weekly_data", {}) if isinstance(info_dict.get("weekly_data", {}), dict) else {}
+    week_entry = weekly_data.get(week_key)
+    # 新結構：week_entry 為 { dungeon_name: {...} }
+    if isinstance(week_entry, dict) and any(k in DUNGEON_OPTIONS for k in week_entry.keys()):
+        # 若只有一個副本，就用它；多個則優先使用 DEFAULT_DUNGEON，否則任一
+        dungeon_keys = list(week_entry.keys())
+        if len(dungeon_keys) == 1:
+            return normalize_dungeon(dungeon_keys[0])
+        if DEFAULT_DUNGEON in dungeon_keys:
+            return DEFAULT_DUNGEON
+        return normalize_dungeon(dungeon_keys[0])
+    # 舊結構：單一物件含 dungeon 欄位
+    if isinstance(week_entry, dict) and "dungeon" in week_entry:
+        return normalize_dungeon(week_entry.get("dungeon", DEFAULT_DUNGEON))
+    if "weekly_dungeon" in info_dict:
+        return normalize_dungeon(info_dict.get("weekly_dungeon"))
+    return DEFAULT_DUNGEON
+
+dungeon_default_selection = DEFAULT_DUNGEON
+
+dungeon_default_selection = DEFAULT_DUNGEON
+
 if selected_member_for_signup:
     st.session_state["last_signup_member"] = selected_member_for_signup
 
-    start_thu_quick = get_start_of_week(date.today()) if week_choice_quick == label_this_q else (get_start_of_week(date.today()) + timedelta(days=7))
-    week_key_quick = start_thu_quick.strftime('%Y-%m-%d')
-
     # 預設參與次數
     info_q = all_members.get(selected_member_for_signup, {})
+    dungeon_default_selection = _get_member_default_dungeon(info_q, week_key_quick)
+    dungeon_choice_idx = DUNGEON_OPTIONS.index(dungeon_default_selection) if dungeon_default_selection in DUNGEON_OPTIONS else 0
+    dungeon_choice = signup_cols[2].selectbox(
+        "副本",
+        options=DUNGEON_OPTIONS,
+        index=dungeon_choice_idx,
+        key=f"weekly_signup_dungeon_{selected_member_for_signup}",  # 切換週次時保留當前使用者選擇
+    )
     _wdata_q = info_q.get("weekly_data", {}) if isinstance(info_q.get("weekly_data", {}), dict) else {}
-    if str(_wdata_q.get(week_key_quick, {}).get("participation_count", "")).isdigit():
-        participation_default_q = int(_wdata_q.get(week_key_quick, {}).get("participation_count", 1))
+    week_entry_q = _wdata_q.get(week_key_quick, {}) if isinstance(_wdata_q.get(week_key_quick, {}), dict) else {}
+    dungeon_entry_q = week_entry_q.get(dungeon_choice, {}) if isinstance(week_entry_q, dict) else {}
+    if str(dungeon_entry_q.get("participation_count", "")).isdigit():
+        participation_default_q = int(dungeon_entry_q.get("participation_count", 1))
     elif str(info_q.get("weekly_participation_count", "")).isdigit():
         participation_default_q = int(info_q.get("weekly_participation_count", 1))
     else:
         participation_default_q = 1
 
-    c_top1, c_top2 = st.columns([3, 1])
-    participation_count_q = c_top2.selectbox("本週參與次數", options=[1, 2], index=[1,2].index(participation_default_q), key="weekly_signup_participation")
+    participation_count_q = signup_cols[3].selectbox(
+        "參與次數",
+        options=[1, 2],
+        index=[1, 2].index(participation_default_q),
+        key=f"weekly_signup_participation_{selected_member_for_signup}_{week_key_quick}_{dungeon_choice}",
+    )
 
     # 日期勾選（快速）
     day_names_q = ["星期四", "星期五", "星期六", "星期日", "星期一", "星期二", "星期三"]
@@ -455,21 +552,47 @@ if selected_member_for_signup:
 
     # 預設值（依該成員該週資料）
     weekly_default_q = {}
-    if week_key_quick in _wdata_q:
-        weekly_default_q = _wdata_q.get(week_key_quick, {}).get("availability", {}) or {}
-    elif info_q.get("weekly_week_start") == week_key_quick:
-        weekly_default_q = info_q.get("weekly_availability", {}) or {}
+    if isinstance(week_entry_q, dict) and dungeon_choice in week_entry_q:
+        weekly_default_q = week_entry_q.get(dungeon_choice, {}).get("availability", {}) or {}
 
     cols_q = st.columns(7)
     weekly_availability_q = {}
     for i, (d, label) in enumerate(days_q):
-        weekly_availability_q[label] = cols_q[i].checkbox(f"{label}\n{d.strftime('%m/%d')}", value=bool(weekly_default_q.get(label, False)), key=f"weekly_q_{label}")
+        weekly_availability_q[label] = cols_q[i].checkbox(
+            f"{label}\n{d.strftime('%m/%d')}",
+            value=bool(weekly_default_q.get(label, False)),
+            key=f"weekly_q_{selected_member_for_signup}_{week_key_quick}_{dungeon_choice}_{label}",
+        )
 
     if st.button("📨 送出本次報名", type="primary", use_container_width=True):
         now_iso_q = datetime.now().isoformat(timespec="seconds")
         member_dict_q = st.session_state.data.setdefault("members", {}).get(selected_member_for_signup, {})
         weekly_data_q = member_dict_q.setdefault("weekly_data", {})
-        weekly_data_q[week_key_quick] = {
+        week_entry_save = weekly_data_q.setdefault(week_key_quick, {})
+        # 驗證：本週所有副本的次數總和不可超過 2
+        if isinstance(week_entry_save, dict):
+            old_pc_current = week_entry_save.get(dungeon_choice, {}).get("participation_count", 0) or 0
+            other_total = 0
+            for d_name, d_obj in week_entry_save.items():
+                if d_name == dungeon_choice or not isinstance(d_obj, dict):
+                    continue
+                val = d_obj.get("participation_count", 0) or 0
+                try:
+                    other_total += int(val)
+                except Exception:
+                    continue
+            try:
+                new_pc_int = int(participation_count_q)
+            except Exception:
+                new_pc_int = 0
+            # 先扣掉舊的，再加上新的
+            total_after = other_total + new_pc_int
+            if total_after > 2:
+                st.error("本週所有副本的報名次數總和不可超過 2，請調整後再送出。")
+                st.stop()
+
+        # 寫入目前副本資料
+        week_entry_save[dungeon_choice] = {
             "availability": weekly_availability_q,
             "participation_count": participation_count_q,
             "last_updated": now_iso_q,
@@ -480,6 +603,7 @@ if selected_member_for_signup:
             "weekly_last_updated": now_iso_q,
             "weekly_week_start": week_key_quick,
             "weekly_participation_count": participation_count_q,
+            "weekly_dungeon": dungeon_choice,
         })
         st.session_state.data["members"][selected_member_for_signup] = member_dict_q
         sync_data_and_save()
@@ -497,7 +621,9 @@ next_start_l = start_this + timedelta(days=7)
 next_range_l = f"{next_start_l.strftime('%m/%d')} ~ {(next_start_l + timedelta(days=6)).strftime('%m/%d')}"
 label_this_l = f"本週({this_range_l})"
 label_next_l = f"下週({next_range_l})"
-list_week_choice = st.radio("顯示週次", [label_this_l, label_next_l], horizontal=True, key="list_week_choice")
+list_cols = st.columns([2, 1])
+list_week_choice = list_cols[0].radio("顯示週次", [label_this_l, label_next_l], horizontal=True, key="list_week_choice")
+dungeon_filter = list_cols[1].selectbox("副本", options=["全部"] + DUNGEON_OPTIONS, key="list_dungeon_filter")
 week_start = start_this if list_week_choice == label_this_l else start_this + timedelta(days=7)
 weekday_labels = [
     f"星期四({(week_start + timedelta(days=0)).strftime('%m/%d')})",
@@ -516,31 +642,53 @@ for name, info in st.session_state.data.get("members", {}).items():
     # 優先從 weekly_data 讀取該週資料
     weekly_data = info.get("weekly_data", {}) if isinstance(info.get("weekly_data", {}), dict) else {}
     week_obj = weekly_data.get(show_week)
-    if not week_obj:
-        # 回退舊欄位（只在同週次時顯示）
+
+    # 沒有週資料時，嘗試使用舊欄位（僅支援單副本舊資料）
+    if not isinstance(week_obj, dict) or not week_obj:
         if info.get("weekly_week_start") != show_week:
             continue
         wa = info.get("weekly_availability", {}) or {}
         pc = info.get("weekly_participation_count", "")
-    else:
-        wa = week_obj.get("availability", {}) or {}
-        pc = week_obj.get("participation_count", "")
-
-    # 僅顯示有報名（有任一勾選）的人
-    if not any(bool(wa.get(p, False)) for p in weekday_plain):
+        dungeon_val = normalize_dungeon(info.get("weekly_dungeon", DEFAULT_DUNGEON))
+        if dungeon_filter != "全部" and dungeon_val != dungeon_filter:
+            continue
+        if not any(bool(wa.get(p, False)) for p in weekday_plain):
+            continue
+        participation_count_str = "" if pc in (None, "") else str(pc)
+        row = {
+            "名稱": name,
+            "職業": str(info.get("job", "")),
+            "等級": str(info.get("level", "")),
+            "副本": dungeon_val,
+            "次數": participation_count_str
+        }
+        for plain, label in zip(weekday_plain, weekday_labels):
+            row[label] = "✅" if wa.get(plain, False) else ""
+        rows.append(row)
         continue
 
-    participation_count_str = "" if pc in (None, "") else str(pc)
-    row = {
-        "名稱": name,
-        "職業": str(info.get("job", "")),
-        "等級": str(info.get("level", "")),
-        "次數": participation_count_str
-    }
-    for plain, label in zip(weekday_plain, weekday_labels):
-        row[label] = "✅" if wa.get(plain, False) else ""
-    rows.append(row)
+    # 新結構：同一週可有多個副本
+    for dungeon_key, dungeon_obj in week_obj.items():
+        if not isinstance(dungeon_obj, dict):
+            continue
+        dungeon_val = normalize_dungeon(dungeon_key or dungeon_obj.get("dungeon", DEFAULT_DUNGEON))
+        if dungeon_filter != "全部" and dungeon_val != dungeon_filter:
+            continue
+        wa = dungeon_obj.get("availability", {}) or {}
+        pc = dungeon_obj.get("participation_count", "")
+        if not any(bool(wa.get(p, False)) for p in weekday_plain):
+            continue
+        participation_count_str = "" if pc in (None, "") else str(pc)
+        row = {
+            "名稱": name,
+            "職業": str(info.get("job", "")),
+            "等級": str(info.get("level", "")),
+            "副本": dungeon_val,
+            "次數": participation_count_str
+        }
+        for plain, label in zip(weekday_plain, weekday_labels):
+            row[label] = "✅" if wa.get(plain, False) else ""
+        rows.append(row)
 
-df_members = pd.DataFrame(rows, columns=["名稱","職業","等級","次數"] + weekday_labels)
+df_members = pd.DataFrame(rows, columns=["名稱","職業","等級","副本","次數"] + weekday_labels)
 st.dataframe(df_members, use_container_width=True, hide_index=True)
-    

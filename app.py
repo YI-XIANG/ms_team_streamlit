@@ -277,7 +277,7 @@ def render_global_weekly_availability():
         rows.append(row)
     df_week = pd.DataFrame(rows, columns=["名稱","職業","等級"] + week_days)
     if not df_week.empty:
-        st.dataframe(df_week, width="stretch")
+        st.dataframe(df_week)
     else:
         st.info("本週尚無成員勾選可參加日期。")
     return
@@ -330,7 +330,7 @@ def download_members_csv():
     
     col1, col2 = st.columns(2)
     
-    if col1.button("下載", type="primary", width="stretch"):
+    if col1.button("下載", type="primary"):
         # 這裡可以自訂密碼，建議從 secrets 讀取
         correct_password = st.secrets.get("download_password", st.secrets["setting"]["pwd"])
         
@@ -364,7 +364,6 @@ def download_members_csv():
                     data=csv_data,
                     file_name=filename,
                     mime="text/csv",
-                    width="stretch"
                 )
                 st.success("密碼正確！請點擊上方按鈕下載檔案。")
             else:
@@ -372,7 +371,7 @@ def download_members_csv():
         else:
             st.error("密碼錯誤，請重新輸入。")
     
-    if col2.button("取消", width="stretch"):
+    if col2.button("取消"):
         st.rerun()
 
 
@@ -589,7 +588,7 @@ if selected_member_for_signup:
             key=f"weekly_q_{selected_member_for_signup}_{week_key_quick}_{dungeon_choice}_{label}",
         )
 
-    if st.button("📨 送出本次報名", type="primary", width="stretch"):
+    if st.button("📨 送出本次報名", type="primary"):
         now_iso_q = datetime.now().isoformat(timespec="seconds")
         member_dict_q = st.session_state.data.setdefault("members", {}).get(selected_member_for_signup, {})
         weekly_data_q = member_dict_q.setdefault("weekly_data", {})
@@ -716,7 +715,7 @@ for name, info in st.session_state.data.get("members", {}).items():
         rows.append(row)
 
 df_members = pd.DataFrame(rows, columns=["名稱","職業","等級","副本","次數"] + weekday_labels)
-st.dataframe(df_members, width="stretch", hide_index=True)
+st.dataframe(df_members, hide_index=True)
 
 st.markdown("---")
 ai_prompt_text = build_prompt_from_table(df_members)
@@ -735,7 +734,7 @@ def _get_latus_prompt(df: pd.DataFrame) -> Tuple[str, pd.DataFrame]:
 
 with st.container():
     prompt_btn_cols = st.columns([3, 2])
-    if prompt_btn_cols[0].button("產生拉圖斯分隊", width="stretch"):
+    if prompt_btn_cols[0].button("產生拉圖斯分隊"):
         prompt_text, _ = _get_latus_prompt(df_members)
         st.session_state.latus_prompt = prompt_text
         st.session_state.latus_prompt_triggered = True

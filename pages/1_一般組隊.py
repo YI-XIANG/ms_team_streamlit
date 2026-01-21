@@ -264,7 +264,7 @@ if selected_member_for_search:
     
     if participating_teams:
         df_participating = pd.DataFrame(participating_teams)
-        st.dataframe(df_participating, width="stretch", hide_index=True)
+        st.dataframe(df_participating, hide_index=True)
         st.success(f"✅ 找到 {len(participating_teams)} 個隊伍包含 {selected_member_for_search}")
     else:
         st.info(f"ℹ️ {selected_member_for_search} 目前沒有參與任何隊伍")
@@ -435,7 +435,6 @@ if uploaded_json:
                 },
                 column_order=("排序", "時間", "成員概覽"),
                 num_rows="fixed",
-                width="stretch",
                 hide_index=True,
             )
             _display_uploaded_groups(editable.reset_index(), normalized_teams, all_members, start_of_this_week)
@@ -535,7 +534,7 @@ for idx, team in enumerate(teams):
                 else:
                     df_combined = pd.DataFrame(columns=["名稱","職業","等級","表攻"] + weekday_with_date)
 
-                edited_df = st.data_editor(df_combined, key=f"editor_{idx}", num_rows="fixed", width="stretch",
+                edited_df = st.data_editor(df_combined, key=f"editor_{idx}", num_rows="fixed",
                     column_config={
                         "_index": None,
                         "名稱": st.column_config.SelectboxColumn("名稱", options=member_names_for_team_select, required=False),
@@ -549,7 +548,7 @@ for idx, team in enumerate(teams):
                 st.markdown("---")
 
                 btn_cols = st.columns([2, 1, 1])
-                if btn_cols[0].form_submit_button(f"💾 儲存變更", type="primary", width="stretch"):
+                if btn_cols[0].form_submit_button(f"💾 儲存變更", type="primary"):
                     updated_members = [
                         {"name": row["名稱"], **all_members.get(row["名稱"], {})} if row["名稱"] else {"name": "", "job": "", "level": "", "atk": ""}
                         for _, row in edited_df.iterrows()
@@ -563,13 +562,13 @@ for idx, team in enumerate(teams):
                     st.success(f"隊伍 '{team_name}' 的資料已更新！")
                     st.rerun()
 
-                if btn_cols[1].form_submit_button(f"🔄 清空成員", width="stretch"):
+                if btn_cols[1].form_submit_button(f"🔄 清空成員"):
                     data["teams"][idx]["member"] = [{"name": "", "job": "", "level": "", "atk": ""} for _ in range(MAX_TEAM_SIZE)]
                     save_data(data)
                     st.success(f"隊伍 '{team['team_name']}' 的成員已清空！")
                     st.rerun()
 
-                if btn_cols[2].form_submit_button(f"🗑️ 刪除隊伍", width="stretch"):
+                if btn_cols[2].form_submit_button(f"🗑️ 刪除隊伍"):
                     deleted_name = data["teams"].pop(idx)["team_name"]
                     save_data(data)
                     st.success(f"隊伍 '{deleted_name}' 已被刪除！")

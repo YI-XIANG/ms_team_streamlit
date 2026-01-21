@@ -5,6 +5,8 @@ import re
 import json
 import io
 from typing import Tuple
+import streamlit.components.v1 as components
+from prompt import system_prompt
 
 # Firebase Admin SDK
 import firebase_admin
@@ -20,7 +22,7 @@ JOB_OPTIONS = {
     "🏹 弓箭手": ["狙擊手", "遊俠"],
     "🗡 盜賊": ["暗殺者", "神偷"],
     "🏴‍☠️ 海盜": ["格鬥家", "槍神"],
-    "🧙‍♂️ 法師": ["火毒", "冰雷", "祭師"]
+    "🧙‍♂️ 法師": ["火毒", "冰雷", "祭司"]
 }
 JOB_SELECT_LIST = [job for sublist in JOB_OPTIONS.values() for job in sublist]
 UNAVAILABLE_KEY = "__UNAVAILABLE__"
@@ -275,7 +277,7 @@ def render_global_weekly_availability():
         rows.append(row)
     df_week = pd.DataFrame(rows, columns=["名稱","職業","等級"] + week_days)
     if not df_week.empty:
-        st.dataframe(df_week, use_container_width=True)
+        st.dataframe(df_week, width="stretch")
     else:
         st.info("本週尚無成員勾選可參加日期。")
     return
@@ -296,6 +298,29 @@ def generate_weekly_schedule_days(start_date: date) -> list[str]:
     ]
     return schedule_days
 
+def dataframe_to_markdown(df: pd.DataFrame) -> str:
+    """將 DataFrame 轉成 Markdown 表格字串，供 prompt 使用。"""
+    if df.empty:
+        return ""
+    columns = df.columns.tolist()
+    header = "| " + " | ".join(columns) + " |"
+    separator = "| " + " | ".join("---" for _ in columns) + " |"
+    rows = []
+    for row in df.itertuples(index=False):
+        cells = [
+            "" if pd.isna(value) else str(value)
+            for value in row
+        ]
+        rows.append("| " + " | ".join(cells) + " |")
+    return "\n".join([header, separator] + rows)
+
+def build_prompt_from_table(df: pd.DataFrame) -> str:
+    """套入 Markdown 內容並回傳最終 prompt 文案。"""
+    markdown_table = dataframe_to_markdown(df)
+    if not markdown_table:
+        markdown_table = "目前無顯示成員資料。"
+    return system_prompt.format(markdown=markdown_table)
+
 @st.dialog("下載人員手冊")
 def download_members_csv():
     """彈跳視窗：輸入密碼下載人員手冊"""
@@ -305,7 +330,7 @@ def download_members_csv():
     
     col1, col2 = st.columns(2)
     
-    if col1.button("下載", type="primary", use_container_width=True):
+    if col1.button("下載", type="primary", width="stretch"):
         # 這裡可以自訂密碼，建議從 secrets 讀取
         correct_password = st.secrets.get("download_password", st.secrets["setting"]["pwd"])
         
@@ -339,7 +364,7 @@ def download_members_csv():
                     data=csv_data,
                     file_name=filename,
                     mime="text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
                 st.success("密碼正確！請點擊上方按鈕下載檔案。")
             else:
@@ -347,7 +372,7 @@ def download_members_csv():
         else:
             st.error("密碼錯誤，請重新輸入。")
     
-    if col2.button("取消", use_container_width=True):
+    if col2.button("取消", width="stretch"):
         st.rerun()
 
 
@@ -423,7 +448,7 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
 
         st.markdown("---")
         btn_cols = st.columns([3, 1])
-        if btn_cols[0].form_submit_button("💾 儲存角色資料", use_container_width=True):
+        if btn_cols[0].form_submit_button("💾 儲存角色資料", width="stretch"):
             final_name = (member_id_input or "").strip()
             if not final_name:
                 st.warning("請務必填寫遊戲ID！")
@@ -442,7 +467,7 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
                 st.session_state.profile_expander_open = True
                 st.rerun()
 
-        if selected_member_name and btn_cols[1].form_submit_button("🗑️ 刪除此角色", use_container_width=True):
+        if selected_member_name and btn_cols[1].form_submit_button("🗑️ 刪除此角色", width="stretch"):
             del st.session_state.data["members"][selected_member_name]
             # 同步刪除隊伍中的成員
             for team_idx in range(len(st.session_state.data['teams'])):
@@ -564,7 +589,7 @@ if selected_member_for_signup:
             key=f"weekly_q_{selected_member_for_signup}_{week_key_quick}_{dungeon_choice}_{label}",
         )
 
-    if st.button("📨 送出本次報名", type="primary", use_container_width=True):
+    if st.button("📨 送出本次報名", type="primary", width="stretch"):
         now_iso_q = datetime.now().isoformat(timespec="seconds")
         member_dict_q = st.session_state.data.setdefault("members", {}).get(selected_member_for_signup, {})
         weekly_data_q = member_dict_q.setdefault("weekly_data", {})
@@ -691,4 +716,53 @@ for name, info in st.session_state.data.get("members", {}).items():
         rows.append(row)
 
 df_members = pd.DataFrame(rows, columns=["名稱","職業","等級","副本","次數"] + weekday_labels)
-st.dataframe(df_members, use_container_width=True, hide_index=True)
+st.dataframe(df_members, width="stretch", hide_index=True)
+
+st.markdown("---")
+ai_prompt_text = build_prompt_from_table(df_members)
+st.subheader("🤖 AI 分隊提示詞")
+st.caption("可複製下方文字並貼到分隊協作提示中，內容已包含目前本週顯示的成員資訊。")
+if "latus_prompt_triggered" not in st.session_state:
+    st.session_state.latus_prompt_triggered = False
+
+def _get_latus_prompt(df: pd.DataFrame) -> Tuple[str, pd.DataFrame]:
+    """只保留拉圖斯資料並產生對應 Prompt。"""
+    if df.empty:
+        return "", df
+    latus_df = df[df["副本"] == "拉圖斯"]
+    prompt_text = build_prompt_from_table(latus_df)
+    return prompt_text, latus_df
+
+with st.container():
+    prompt_btn_cols = st.columns([3, 2])
+    if prompt_btn_cols[0].button("產生拉圖斯分隊", width="stretch"):
+        prompt_text, _ = _get_latus_prompt(df_members)
+        st.session_state.latus_prompt = prompt_text
+        st.session_state.latus_prompt_triggered = True
+
+    if st.session_state.get("latus_prompt_triggered") and st.session_state.get("latus_prompt"):
+        prompt_to_copy = st.session_state.latus_prompt
+        safe_prompt = json.dumps(prompt_to_copy)
+        components.html(
+            f"""
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+              <button id="copyPrompt" style="padding:0.35rem 1rem;border:none;border-radius:4px;background:#0b6cf3;color:#fff;font-weight:600;cursor:pointer;">
+                複製拉圖斯分隊 Prompt
+              </button>
+              <span id="copyStatus" style="font-size:0.85rem;color:#008000;"></span>
+            </div>
+            <script>
+            const textToCopy = {safe_prompt};
+            const btn = document.getElementById("copyPrompt");
+            const statusEl = document.getElementById("copyStatus");
+            btn.addEventListener("click", () => {{
+                navigator.clipboard.writeText(textToCopy).then(() => {{
+                    statusEl.textContent = "已複製，可貼到 prompt 內。";
+                }}).catch(() => {{
+                    statusEl.textContent = "瀏覽器無法自動複製，請手動 Ctrl+C。";
+                }});
+            }});
+            </script>
+            """,
+            height=70,
+        )

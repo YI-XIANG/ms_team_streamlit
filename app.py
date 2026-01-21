@@ -448,7 +448,7 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
 
         st.markdown("---")
         btn_cols = st.columns([3, 1])
-        if btn_cols[0].form_submit_button("💾 儲存角色資料", width="stretch"):
+        if btn_cols[0].form_submit_button("💾 儲存角色資料"):
             final_name = (member_id_input or "").strip()
             if not final_name:
                 st.warning("請務必填寫遊戲ID！")
@@ -467,7 +467,7 @@ with st.expander("點此註冊或更新你的個人資料", expanded=st.session_
                 st.session_state.profile_expander_open = True
                 st.rerun()
 
-        if selected_member_name and btn_cols[1].form_submit_button("🗑️ 刪除此角色", width="stretch"):
+        if selected_member_name and btn_cols[1].form_submit_button("🗑️ 刪除此角色"):
             del st.session_state.data["members"][selected_member_name]
             # 同步刪除隊伍中的成員
             for team_idx in range(len(st.session_state.data['teams'])):
